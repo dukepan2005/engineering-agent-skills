@@ -31,6 +31,17 @@ The wrapper checks these dependencies together with this repository's
 `$azure-devops-boards-skill` before it begins a Task. It stops and reports a
 missing dependency; it never installs one automatically.
 
+`$azure-devops-boards-skill` also requires a locally authenticated Azure CLI
+with the Azure DevOps extension:
+
+```bash
+az extension add --name azure-devops
+az login
+```
+
+See the [Azure Boards Skill guide](skills/azure-devops-boards-skill/README.md)
+for connection variables and Azure CLI Python configuration.
+
 ## Install a Skill
 
 Use the [`skills`](https://skills.sh/) CLI. List the Skills in this repository:
