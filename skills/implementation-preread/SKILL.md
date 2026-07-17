@@ -1,37 +1,37 @@
 ---
 name: implementation-preread
-description: Delegate one fixed-model, read-only Codex subagent to prepare a source-backed implementation readiness brief from a ticket, issue, or specification before a separate implementation run. Use when the user asks to preread, orient on, inspect, or hand off upcoming implementation work, especially before invoking $implement.
+description: Prepare a read-only, source-backed implementation readiness brief from a ticket, issue, or specification before a separate implementation run. Use when the user asks to preread, orient on, inspect, or hand off upcoming implementation work, especially before invoking $implement. Use `--delegated` only when the user explicitly wants a fixed-model Codex subagent to perform the preread.
 ---
 
 # Implementation Preread
 
 Prepare orientation only. Do not implement the work.
 
-## Delegate to the Fixed-Model Prereader in Codex
+## Select the Execution Mode
 
-When the runtime is Codex, this integration requires the custom subagent named
-`implementation-prereader`:
+Treat `--delegated` as an execution flag, not part of the ticket identifier.
 
-1. Before inspecting the ticket or repository, spawn exactly one
-   `implementation-prereader` subagent.
-2. Give it the ticket or specification identifier and request the readiness
-   brief defined below.
-3. Wait for its result. Check only that the required sections are present, then
-   return the report without independently repeating the investigation.
-4. If the named subagent is unavailable, report that its configuration must be
-   installed and stop. Do not silently substitute the parent model or a
-   differently configured subagent.
+- Without `--delegated`, perform the Prereader Contract in the main agent. Do
+  not create a subagent.
+- With `--delegated` in Codex, use the custom subagent named
+  `implementation-prereader`:
+  1. Before inspecting the ticket or repository, spawn exactly one such
+     subagent.
+  2. Give it the ticket or specification identifier and request the readiness
+     brief defined below.
+  3. Wait for its result. Check only that the required sections are present,
+     then return the report without independently repeating the investigation.
+  4. If the named subagent is unavailable, report that its configuration must
+     be installed and stop. Do not silently substitute the parent model or a
+     differently configured subagent.
+- With `--delegated` in a non-Codex host, report that fixed-model delegation is
+  unavailable and stop. Do not fall back to main-agent execution.
 
-The parent may not create additional preread subagents. The prereader may not
-create nested subagents.
-
-In a non-Codex host, perform the Prereader Contract directly and retain every
-read-only and budget constraint below. Do not claim use of the fixed Codex
-agent configuration.
+Delegated runs may not create additional preread or nested subagents.
 
 ## Budget
 
-- Use one read-only subagent only.
+- Default runs use no subagent. Delegated runs use one read-only subagent only.
 - Inspect only current authority and directly relevant code, tests, and docs;
   do not scan unrelated directories.
 - Do not run builds, tests, migrations, generators, or any mutation.
@@ -41,7 +41,8 @@ agent configuration.
 
 ## Prereader Contract
 
-The fixed-model prereader performs the following read-only work.
+The main agent in default mode, or the fixed-model prereader in delegated mode,
+performs the following read-only work.
 
 ## Read Current Authority
 
@@ -71,8 +72,8 @@ over earlier plans, briefs, and handoffs. State conflicts explicitly.
   whose purpose is implementation verification.
 - Record open questions instead of asking the user unless an unresolved
   ambiguity would materially change the implementation scope.
-- Do not override the prereader model or reasoning level. The installed custom
-  agent configuration is authoritative for this preread.
+- In delegated mode, do not override the prereader model or reasoning level.
+  The installed custom agent configuration is authoritative for that preread.
 - Stop after producing the readiness brief.
 
 ## Recommend the Implementation Profile

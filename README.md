@@ -65,7 +65,15 @@ It returns a read-only readiness brief covering current authority, scope, code
 map, risks, a recommended implementation profile, and a compact handoff. The
 later implementation must independently re-read current authority and code.
 
-For Codex, install the fixed prereader agent once after installing the Skill:
+This default form runs in the main agent and creates no subagent. To opt into a
+fixed-model Codex subagent, use:
+
+```text
+$implementation-preread --delegated AB#169
+```
+
+For the delegated form, install the fixed prereader agent once after installing
+the Skill:
 
 ```bash
 mkdir -p ~/.codex/agents
@@ -73,12 +81,11 @@ cp ~/.codex/skills/implementation-preread/assets/codex/implementation-prereader.
   ~/.codex/agents/implementation-prereader.toml
 ```
 
-Start the next Codex task after copying the file. Every invocation then creates
+Start the next Codex task after copying the file. A delegated invocation creates
 exactly one `gpt-5.6-terra` / `medium` read-only subagent and forwards its
 600–900-token brief. It performs no verification commands and does not fall
 back to a different model if the agent is unavailable. This integration is
-Codex-specific; other hosts can use the read-only workflow but cannot assume
-the same fixed subagent configuration.
+Codex-specific; `--delegated` fails closed in other hosts.
 
 ### Task model planning
 
