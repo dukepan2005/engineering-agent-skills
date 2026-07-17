@@ -42,19 +42,32 @@ over earlier plans, briefs, and handoffs. State conflicts explicitly.
 ## Recommend the Implementation Profile
 
 For the later implementation run, choose only between `gpt-5.6-terra` and
-`gpt-5.6-sol`:
+`gpt-5.6-sol`. Choose the lowest-cost profile that has a credible path to
+meeting the acceptance criteria and focused verification requirements.
 
-- Prefer `gpt-5.6-terra` for bounded, well-specified, localized, or mechanical
-  work.
-- Prefer `gpt-5.6-sol` for cross-cutting architecture, concurrency, lifecycle,
-  data-integrity, security, or materially ambiguous work.
+Use only evidence found during this preread:
 
-Recommend the lowest reasoning level justified by the evidence: `medium` for
-straightforward work, `high` for normal non-trivial implementation, and `xhigh`
-only for concrete complexity or risk. Never recommend `max` as a default;
-reserve it as an escalation trigger after a specific unresolved blocker is
-identified. Explain the choice in one sentence and list concrete escalation
-triggers.
+- Ambiguity: are acceptance criteria, ownership, and expected behavior clear?
+- Coupling: how many modules, repositories, contracts, or lifecycle stages change?
+- Failure cost: could a wrong change cause data loss, security exposure,
+  compatibility breakage, or difficult rollback?
+- Reasoning hazards: concurrency, ordering, migrations, deletion/cutover,
+  negative paths, or non-local invariants.
+- Verification strength: do focused tests, types, migrations, or established
+  patterns independently detect a wrong implementation?
+
+Choose `gpt-5.6-terra` when scope is bounded and current authority plus focused
+verification make incorrect assumptions cheap to detect. Choose `gpt-5.6-sol`
+when unresolved ambiguity, cross-boundary coupling, or failure cost requires
+stronger judgment before implementation.
+
+Use `medium` by default for a clear, bounded Task with a credible focused
+verification plan. Use `high` only for multiple coordinated changes or one
+material reasoning hazard. Use `xhigh` only when high failure cost combines with
+concrete uncertainty, concurrency/ordering, migration/compatibility, or
+cross-repository risk. Never recommend `max` initially; name it only as an
+escalation after a fresh authority/code read and an unsuccessful lower-effort
+attempt leave a specific issue unresolved.
 
 ## Return the Readiness Brief
 
@@ -81,9 +94,11 @@ Use this structure:
 - Evidence-backed risks, conflicts, and unknowns
 
 ## Recommended implementation profile
-- Model and reasoning level
-- Why
-- Escalation triggers
+- Model: `gpt-5.6-terra` or `gpt-5.6-sol`
+- Reasoning: `medium`, `high`, or `xhigh`
+- Evidence: two to four concrete signals from the ticket or code
+- Why not lower: one sentence
+- Escalate when: observable condition(s), not a generic difficulty label
 
 ## Handoff
 - Three to six compact instructions for the later `$implement` run
