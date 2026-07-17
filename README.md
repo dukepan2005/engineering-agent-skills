@@ -24,8 +24,7 @@ when appropriate.
 For Codex, for example:
 
 ```bash
-npx skills@latest add mattpocock/skills \
-  --skill implement --skill code-review --skill tdd --agent codex --global
+npx skills@latest add mattpocock/skills --global
 ```
 
 The wrapper checks these dependencies together with this repository's
