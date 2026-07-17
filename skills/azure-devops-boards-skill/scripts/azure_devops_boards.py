@@ -111,6 +111,45 @@ def _has_relation(item, rel, url):
     return any(r.get("rel") == rel and r.get("url") == url for r in item.get("relations", []))
 
 
+def _relation_summary(item):
+    """Return relation identities only; never expand linked work items."""
+    result = []
+    for relation in item.get("relations", []):
+        target = relation.get("url", "").rsplit("/", 1)[-1]
+        result.append({"rel": relation.get("rel"), "targetId": int(target) if target.isdigit() else target})
+    return result
+
+
+def _scope_summary(description):
+    """Keep structured acceptance criteria; otherwise retain authority text."""
+    text = html.unescape(description or "")
+    lines = text.splitlines()
+    checklist = [line.strip() for line in lines if line.lstrip().startswith(("- [ ]", "- [x]", "- [X]"))]
+    if checklist:
+        return {"source": "markdown-checklist", "acceptanceCriteria": checklist}
+    heading = next((index for index, line in enumerate(lines)
+                    if line.strip().lower().lstrip("#").strip() in {"acceptance criteria", "acceptance", "验收标准"}), None)
+    if heading is not None:
+        body = []
+        for line in lines[heading + 1:]:
+            if line.startswith("#"):
+                break
+            body.append(line)
+        return {"source": "acceptance-heading", "acceptanceCriteria": "\n".join(body).strip()}
+    return {"source": "description-fallback", "description": text}
+
+
+def preflight(args):
+    """Emit the smallest source-of-truth snapshot needed to begin one Task."""
+    item = connect(args)[0].read(args.id)
+    fields = item.get("fields", {})
+    emit({"id": item.get("id", args.id), "rev": item.get("rev"),
+          "type": fields.get("System.WorkItemType"), "state": fields.get("System.State"),
+          "title": fields.get("System.Title"),
+          "scope": _scope_summary(fields.get("System.Description", "")),
+          "relations": _relation_summary(item)})
+
+
 def _evaluate(item, expectation, phase):
     if expectation.description is not None: assert_description(item, expectation.description)
     fields = item.get("fields", {})
@@ -181,6 +220,42 @@ def add_comment(args):
     emit({"mode": "applied", "id": args.id, "commentId": saved.get("id")})
 
 
+def close_task(args):
+    """Persist one final Task patch and one Markdown completion comment.
+
+    The preflight revision avoids a redundant pre-write read. The patch's rev
+    test still prevents a write when the work item has changed.
+    """
+    client, cls = connect(args)
+    comment = args.comment_file.read_text()
+    if not comment.strip(): raise RuntimeError("Comment must not be empty.")
+    fields, text = {}, args.description_file.read_text() if args.description_file else None
+    if args.state is not None: fields["System.State"] = args.state
+    has_patch = text is not None or bool(fields)
+    expected = args.expected_rev
+    if expected is None and has_patch:
+        expected = client.read(args.id)["rev"]
+    if not args.apply:
+        if has_patch:
+            document = [op(cls, "test", "/rev", expected)]
+            if text is not None: document += [op(cls, "add", "/fields/System.Description", text), op(cls, "add", "/multilineFieldsFormat/System.Description", "markdown")]
+            for field, value in fields.items(): document.append(op(cls, "add", f"/fields/{field}", value))
+            safe_mutate(client=client, target=ExistingItem(args.id), document=document, expectation=Expectation(fields=fields, description=text), apply=False)
+        emit({"mode": "validated", "id": args.id, "fields": fields, "comment": {"format": "markdown", "length": len(comment)}})
+        return
+    mutation = None
+    if has_patch:
+        document = [op(cls, "test", "/rev", expected)]
+        if text is not None: document += [op(cls, "add", "/fields/System.Description", text), op(cls, "add", "/multilineFieldsFormat/System.Description", "markdown")]
+        for field, value in fields.items(): document.append(op(cls, "add", f"/fields/{field}", value))
+        mutation = safe_mutate(client=client, target=ExistingItem(args.id), document=document, expectation=Expectation(fields=fields, description=text), apply=True)
+    saved = client.add_comment(args.id, comment)
+    if saved is None or saved.get("format", "").lower() != "markdown" or html.unescape(saved.get("text", "")) != comment:
+        raise RuntimeError("Markdown comment did not persist.")
+    emit({"mode": "applied", "id": args.id, "rev": mutation.get("rev") if mutation else None,
+          "fields": fields, "commentId": saved.get("id")})
+
+
 def connection(parser, team=False):
     parser.add_argument("--organization", default=os.environ.get("AZURE_DEVOPS_ORG"), required=not os.environ.get("AZURE_DEVOPS_ORG")); parser.add_argument("--project", default=os.environ.get("AZURE_DEVOPS_PROJECT"), required=not os.environ.get("AZURE_DEVOPS_PROJECT"))
     if team: parser.add_argument("--team", default=os.environ.get("AZURE_DEVOPS_TEAM"), required=not os.environ.get("AZURE_DEVOPS_TEAM"))
@@ -190,11 +265,13 @@ def parser():
     root = argparse.ArgumentParser(description=__doc__); commands = root.add_subparsers(required=True)
     current = commands.add_parser("current-sprint"); connection(current, True); current.set_defaults(run=lambda a: print(sprint(a)))
     show = commands.add_parser("show"); connection(show); show.add_argument("--id", type=int, required=True); show.set_defaults(run=lambda a: emit(connect(a)[0].read(a.id)))
+    preflight_p = commands.add_parser("implement-preflight"); connection(preflight_p); preflight_p.add_argument("--id", type=int, required=True); preflight_p.set_defaults(run=preflight)
     create_p = commands.add_parser("create"); connection(create_p, True); create_p.add_argument("--apply", action="store_true"); create_p.add_argument("--type", choices=("User Story", "Task", "Bug"), required=True); create_p.add_argument("--title", required=True); create_p.add_argument("--description-file", type=Path, required=True); create_p.add_argument("--iteration"); create_p.add_argument("--tags", action="append", default=[])
     for kind in RELATIONS: create_p.add_argument(f"--{kind}", action="append", type=int, default=[])
     create_p.set_defaults(run=create)
     update_p = commands.add_parser("update"); connection(update_p); update_p.add_argument("--apply", action="store_true"); update_p.add_argument("--id", type=int, required=True); update_p.add_argument("--description-file", type=Path); update_p.add_argument("--state"); update_p.add_argument("--iteration"); update_p.set_defaults(run=update)
     comment = commands.add_parser("add-comment"); connection(comment); comment.add_argument("--apply", action="store_true"); comment.add_argument("--id", type=int, required=True); comment.add_argument("--comment-file", type=Path, required=True); comment.set_defaults(run=add_comment)
+    close = commands.add_parser("close-task"); connection(close); close.add_argument("--apply", action="store_true"); close.add_argument("--id", type=int, required=True); close.add_argument("--expected-rev", type=int); close.add_argument("--description-file", type=Path); close.add_argument("--state"); close.add_argument("--comment-file", type=Path, required=True); close.set_defaults(run=close_task)
     link = commands.add_parser("add-link"); connection(link); link.add_argument("--apply", action="store_true"); link.add_argument("--id", type=int, required=True); link.add_argument("--kind", choices=tuple(RELATIONS), required=True); link.add_argument("--target-id", type=int, required=True); link.set_defaults(run=add_link)
     return root
 
