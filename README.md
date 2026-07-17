@@ -44,6 +44,50 @@ Omit `--global` to install into the current project instead. Omit the explicit
 `--agent` option to let the CLI detect the active host. Use `npx skills update
 --global` later to update installed global Skills.
 
+## Use the Skills
+
+### Azure Boards
+
+Invoke `$azure-devops-boards-skill` when reading or changing Azure Boards work
+items. The Skill validates every mutation before it applies it; see its
+[dedicated guide](skills/azure-devops-boards-skill/README.md) for prerequisites
+and command examples.
+
+### Implementation preread
+
+Invoke the Skill before starting an implementation run:
+
+```text
+$implementation-preread AB#169
+```
+
+It returns a read-only readiness brief covering current authority, scope, code
+map, risks, a recommended implementation profile, and a compact handoff. Select
+the preread model outside the Skill; the later implementation must independently
+re-read current authority and code.
+
+### Task model planning
+
+Invoke the Skill to plan a Story or a set of tickets:
+
+```text
+$task-model-planner AB#167
+```
+
+It returns one cost-aware recommendation per Task: `gpt-5.6-terra` or
+`gpt-5.6-sol`, a thinking level, evidence, confidence, and escalation triggers.
+
+### Recommended delivery flow
+
+```text
+$task-model-planner <Story>
+$implementation-preread <Task>
+$implement <Task>
+```
+
+`$implement` is supplied by the agent host or your own installed implementation
+workflow. The two planning Skills never edit code, Git state, or Azure Boards.
+
 ## Development
 
 - Keep reusable agent instructions in `SKILL.md`; keep human-facing catalog and
