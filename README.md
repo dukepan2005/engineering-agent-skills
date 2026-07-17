@@ -9,6 +9,7 @@ its own triggering and runtime instructions.
 | Skill | Purpose |
 |---|---|
 | [`azure-devops-boards-skill`](skills/azure-devops-boards-skill/) | Safely read and mutate Azure DevOps Boards work items through the locally authenticated Azure CLI. |
+| [`azure-task-implement`](skills/azure-task-implement/) | Wrap `$implement` with compact Azure Boards Task preflight and closeout. |
 | [`task-model-planner`](skills/task-model-planner/) | Recommend the lowest reliable `gpt-5.6-terra` or `gpt-5.6-sol` profile and thinking level for each Task. |
 
 ## Install a Skill
@@ -45,6 +46,20 @@ items. The Skill validates every mutation before it applies it; see its
 [dedicated guide](skills/azure-devops-boards-skill/README.md) for prerequisites
 and command examples.
 
+### Azure Task delivery
+
+Invoke this wrapper to implement one Azure Boards Task without reproducing a
+project-specific tracker gate:
+
+```text
+$azure-task-implement AB#169
+```
+
+It runs one compact tracker preflight, invokes `$implement`, and performs a
+validated Markdown-safe closeout after successful verification and commit. Use
+`$azure-task-implement AB#169 --state Closed` only when the final state is
+explicitly known; otherwise the wrapper preserves the current state.
+
 ### Task model planning
 
 Invoke the Skill to plan a Story or a set of tickets:
@@ -60,11 +75,13 @@ It returns one cost-aware recommendation per Task: `gpt-5.6-terra` or
 
 ```text
 $task-model-planner <Story>
-$implement <Task>
+$azure-task-implement <Task>
 ```
 
 `$implement` is supplied by the agent host or your own installed implementation
-workflow. The planning Skill never edits code, Git state, or Azure Boards.
+workflow. `$azure-task-implement` requires it plus
+`$azure-devops-boards-skill`; the planning Skill never edits code, Git state, or
+Azure Boards.
 
 ## Development
 
