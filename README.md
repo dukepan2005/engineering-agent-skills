@@ -17,9 +17,8 @@ its own triggering and runtime instructions.
 `azure-task-implement` wraps the third-party `$implement` workflow. Installing
 this repository does **not** install Skills from
 [`mattpocock/skills`](https://github.com/mattpocock/skills). Before using the
-wrapper, install its required `$implement` and `$code-review` Skills separately
-for the same agent host; `$tdd` is recommended because `$implement` uses it
-when appropriate.
+wrapper, install its required `$implement` Skill separately for the same agent
+host; `$tdd` is recommended because `$implement` uses it when appropriate.
 
 For Codex, for example:
 
@@ -27,9 +26,9 @@ For Codex, for example:
 npx skills@latest add mattpocock/skills
 ```
 
-The wrapper checks these dependencies together with this repository's
-`$azure-devops-boards-skill` before it begins a Task. It stops and reports a
-missing dependency; it never installs one automatically.
+The wrapper also requires this repository's `$azure-devops-boards-skill`. It
+checks every dependency before it begins a Task, stops and reports a missing
+dependency, and never installs one automatically.
 
 `$azure-devops-boards-skill` also requires a locally authenticated Azure CLI
 with the Azure DevOps extension:
@@ -85,18 +84,19 @@ project-specific tracker gate:
 $azure-task-implement AB#169
 ```
 
-It runs one compact tracker preflight, invokes `$implement`, and performs a
-validated Markdown-safe closeout after successful verification and commit. Use
-`$azure-task-implement AB#169 --state Closed` only when the final state is
-explicitly known; otherwise the wrapper preserves the current state.
+It runs one compact tracker preflight, then delegates implementation, testing,
+review, and commit to the complete `$implement` workflow before performing
+validated Markdown-safe closeout. Use `$azure-task-implement AB#169 --state
+Closed` only when the final state is explicitly known; otherwise the wrapper
+preserves the current state.
 
 #### Dependencies
 
 This wrapper does not bundle or install third-party Skills. Before invoking it,
-install `$implement` and `$code-review` from
+install `$implement` from
 [`mattpocock/skills`](https://github.com/mattpocock/skills), and install this
-repository's `$azure-devops-boards-skill` for the same agent host. It checks for
-all three before reading or changing a Task and stops with the relevant install
+repository's `$azure-devops-boards-skill` for the same agent host. It checks
+both before reading or changing a Task and stops with the relevant install
 command if one is unavailable. `$tdd` from `mattpocock/skills` is recommended,
 because `$implement` uses it where appropriate.
 

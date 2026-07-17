@@ -1,6 +1,6 @@
 ---
 name: azure-task-implement
-description: "Deliver one Azure DevOps Boards Task through a compact lifecycle: preflight its current scope, invoke $implement, then validate and persist a Markdown-safe closeout. Use when the user asks to implement, deliver, finish, or close a specific Azure Boards Task such as AB#169 and wants Azure tracking synchronized without project-specific workflow gates."
+description: "Deliver one Azure DevOps Boards Task through a compact lifecycle: preflight its current scope, run the complete third-party $implement workflow, then validate and persist a Markdown-safe closeout. Use when the user asks to implement, deliver, finish, or close a specific Azure Boards Task such as AB#169 and wants Azure tracking synchronized without project-specific workflow gates."
 ---
 
 # Azure Task Implement
@@ -15,7 +15,7 @@ Skill provides the reusable lifecycle, not a replacement project process.
 Before reading a Task, confirm that the current host can invoke all of these
 Skills:
 
-- `$implement` and `$code-review` from `mattpocock/skills`
+- `$implement` from `mattpocock/skills`
 - `$azure-devops-boards-skill` from this repository
 
 If any is unavailable, stop without inspecting or changing the tracker, code,
@@ -23,15 +23,13 @@ or Git state. State the missing Skill and print only the relevant install
 command for the current host, for example:
 
 ```bash
-npx skills@latest add mattpocock/skills \
-  --skill implement --skill code-review --agent codex --global
+npx skills@latest add mattpocock/skills
 
-npx skills@latest add dukepan2005/engineering-agent-skills \
-  --skill azure-devops-boards-skill --agent codex --global
+npx skills@latest add dukepan2005/engineering-agent-skills
 ```
 
-Replace `codex` with the active host when necessary. Do not install a missing
-dependency during a delivery run.
+Choose the required Skills for the active host interactively. Do not install a
+missing dependency during a delivery run.
 
 ## Start Once
 
@@ -41,8 +39,8 @@ dependency during a delivery run.
    (revision, scope, and relation IDs) as the tracker authority for this thread.
 3. Stop if the item state, replacement relation, or blocker makes implementation
    invalid. Do not change a tracker state merely to begin work.
-4. Invoke `$implement` for that Task, using the preflight scope as the active
-   task boundary. Do not run a second full tracker read before editing.
+4. Require a clean worktree before editing so the Task commit and review cover
+   only this Task.
 
 Run preflight again only when the session or branch changes, the user says the
 Task changed, a relation/scope conflict appears, or closeout reports a stale
@@ -50,7 +48,10 @@ revision.
 
 ## Implement One Task
 
-- Implement, test, review, and commit through `$implement`.
+- Invoke the complete `$implement` workflow with the current Task scope and
+  acceptance criteria from preflight. Let it use TDD where appropriate, run
+  its verification, review the work, and create the one Task commit in its
+  defined order. Do not replace or duplicate its review or commit steps.
 - Do not fetch or mutate Azure Boards for each file change, test run, or commit
   attempt.
 - If implementation fails or verification is incomplete, do not close the Task.
