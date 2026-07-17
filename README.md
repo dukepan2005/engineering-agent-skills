@@ -9,7 +9,7 @@ its own triggering and runtime instructions.
 | Skill | Purpose |
 |---|---|
 | [`azure-devops-boards-skill`](skills/azure-devops-boards-skill/) | Safely read and mutate Azure DevOps Boards work items through the locally authenticated Azure CLI. |
-| [`implementation-preread`](skills/implementation-preread/) | Produce a read-only, source-backed implementation readiness brief before implementation. |
+| [`implementation-preread`](skills/implementation-preread/) | In Codex, delegate one fixed-model, read-only preread before implementation. |
 | [`task-model-planner`](skills/task-model-planner/) | Recommend the lowest reliable `gpt-5.6-terra` or `gpt-5.6-sol` profile and thinking level for each Task. |
 
 ## Install a Skill
@@ -62,9 +62,23 @@ $implementation-preread AB#169
 ```
 
 It returns a read-only readiness brief covering current authority, scope, code
-map, risks, a recommended implementation profile, and a compact handoff. Select
-the preread model outside the Skill; the later implementation must independently
-re-read current authority and code.
+map, risks, a recommended implementation profile, and a compact handoff. The
+later implementation must independently re-read current authority and code.
+
+For Codex, install the fixed prereader agent once after installing the Skill:
+
+```bash
+mkdir -p ~/.codex/agents
+cp ~/.codex/skills/implementation-preread/assets/codex/implementation-prereader.toml \
+  ~/.codex/agents/implementation-prereader.toml
+```
+
+Start the next Codex task after copying the file. Every invocation then creates
+exactly one `gpt-5.6-terra` / `medium` read-only subagent and forwards its
+600–900-token brief. It performs no verification commands and does not fall
+back to a different model if the agent is unavailable. This integration is
+Codex-specific; other hosts can use the read-only workflow but cannot assume
+the same fixed subagent configuration.
 
 ### Task model planning
 

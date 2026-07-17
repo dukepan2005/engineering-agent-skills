@@ -1,11 +1,47 @@
 ---
 name: implementation-preread
-description: Prepare a read-only, source-backed implementation readiness brief from a ticket, issue, or specification before a separate implementation run. Use when the user asks to preread, orient on, inspect, or hand off upcoming implementation work, especially before switching models and invoking $implement.
+description: Delegate one fixed-model, read-only Codex subagent to prepare a source-backed implementation readiness brief from a ticket, issue, or specification before a separate implementation run. Use when the user asks to preread, orient on, inspect, or hand off upcoming implementation work, especially before invoking $implement.
 ---
 
 # Implementation Preread
 
 Prepare orientation only. Do not implement the work.
+
+## Delegate to the Fixed-Model Prereader in Codex
+
+When the runtime is Codex, this integration requires the custom subagent named
+`implementation-prereader`:
+
+1. Before inspecting the ticket or repository, spawn exactly one
+   `implementation-prereader` subagent.
+2. Give it the ticket or specification identifier and request the readiness
+   brief defined below.
+3. Wait for its result. Check only that the required sections are present, then
+   return the report without independently repeating the investigation.
+4. If the named subagent is unavailable, report that its configuration must be
+   installed and stop. Do not silently substitute the parent model or a
+   differently configured subagent.
+
+The parent may not create additional preread subagents. The prereader may not
+create nested subagents.
+
+In a non-Codex host, perform the Prereader Contract directly and retain every
+read-only and budget constraint below. Do not claim use of the fixed Codex
+agent configuration.
+
+## Budget
+
+- Use one read-only subagent only.
+- Inspect only current authority and directly relevant code, tests, and docs;
+  do not scan unrelated directories.
+- Do not run builds, tests, migrations, generators, or any mutation.
+- Return a 600–900 token brief without raw command logs or long source
+  excerpts. If the evidence is insufficient, name the missing source and stop
+  rather than broadening the search.
+
+## Prereader Contract
+
+The fixed-model prereader performs the following read-only work.
 
 ## Read Current Authority
 
@@ -35,8 +71,8 @@ over earlier plans, briefs, and handoffs. State conflicts explicitly.
   whose purpose is implementation verification.
 - Record open questions instead of asking the user unless an unresolved
   ambiguity would materially change the implementation scope.
-- Do not attempt to select or switch the model used for this preread. Model
-  selection happens outside the Skill.
+- Do not override the prereader model or reasoning level. The installed custom
+  agent configuration is authoritative for this preread.
 - Stop after producing the readiness brief.
 
 ## Recommend the Implementation Profile
