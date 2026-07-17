@@ -12,6 +12,26 @@ its own triggering and runtime instructions.
 | [`azure-task-implement`](skills/azure-task-implement/) | Wrap `$implement` with compact Azure Boards Task preflight and closeout. |
 | [`task-model-planner`](skills/task-model-planner/) | Recommend the lowest reliable `gpt-5.6-terra` or `gpt-5.6-sol` profile and thinking level for each Task. |
 
+## Third-Party Dependency
+
+`azure-task-implement` wraps the third-party `$implement` workflow. Installing
+this repository does **not** install Skills from
+[`mattpocock/skills`](https://github.com/mattpocock/skills). Before using the
+wrapper, install its required `$implement` and `$code-review` Skills separately
+for the same agent host; `$tdd` is recommended because `$implement` uses it
+when appropriate.
+
+For Codex, for example:
+
+```bash
+npx skills@latest add mattpocock/skills \
+  --skill implement --skill code-review --skill tdd --agent codex --global
+```
+
+The wrapper checks these dependencies together with this repository's
+`$azure-devops-boards-skill` before it begins a Task. It stops and reports a
+missing dependency; it never installs one automatically.
+
 ## Install a Skill
 
 Use the [`skills`](https://skills.sh/) CLI. List the Skills in this repository:
