@@ -1,6 +1,6 @@
 ---
 name: azure-task-implement
-description: "Deliver one Azure DevOps Boards Task through a compact lifecycle: preflight its current scope, apply $implement's coding and verification discipline, review the uncommitted diff, then validate and persist a Markdown-safe closeout. Use when the user asks to implement, deliver, finish, or close a specific Azure Boards Task such as AB#169 and wants Azure tracking synchronized without project-specific workflow gates."
+description: "Deliver one Azure DevOps Boards Task through a compact lifecycle: preflight its current scope, run the complete third-party $implement workflow, then validate and persist a Markdown-safe closeout. Use when the user asks to implement, deliver, finish, or close a specific Azure Boards Task such as AB#169 and wants Azure tracking synchronized without project-specific workflow gates."
 ---
 
 # Azure Task Implement
@@ -16,7 +16,7 @@ Before reading a Task, confirm that the current host can invoke all of these
 Skills:
 
 - `$implement` from `mattpocock/skills`
-- `$precommit-code-review` and `$azure-devops-boards-skill` from this repository
+- `$azure-devops-boards-skill` from this repository
 
 If any is unavailable, stop without inspecting or changing the tracker, code,
 or Git state. State the missing Skill and print only the relevant install
@@ -39,27 +39,19 @@ missing dependency during a delivery run.
    (revision, scope, and relation IDs) as the tracker authority for this thread.
 3. Stop if the item state, replacement relation, or blocker makes implementation
    invalid. Do not change a tracker state merely to begin work.
-4. Require a clean worktree. Record `git rev-parse HEAD` as the review baseline
-   before editing; preserve this exact commit until pre-commit review finishes.
+4. Require a clean worktree before editing so the Task commit and review cover
+   only this Task.
 
 Run preflight again only when the session or branch changes, the user says the
 Task changed, a relation/scope conflict appears, or closeout reports a stale
 revision.
 
-## Implement and Review One Task
+## Implement One Task
 
-- Use the implementation and verification phase of `$implement` for this Task:
-  use TDD where appropriate, run regular typechecks and focused tests, then the
-  full required suite. Do **not** execute its terminal `$code-review` or commit
-  directives; this wrapper owns those steps so its review has an explicit
-  working-tree baseline and Azure closeout remains last.
-- Before any commit, invoke `$precommit-code-review` with the recorded baseline
-  and the preflight acceptance criteria. It reviews the uncommitted worktree
-  diff on separate Standards and Spec axes.
-- Fix actionable review findings, rerun affected verification, and repeat
-  `$precommit-code-review` until no actionable finding remains.
-- Confirm `HEAD` still equals the recorded baseline, then create the one Task
-  commit. Never create a provisional or review-only commit.
+- Invoke the complete `$implement` workflow with the current Task scope and
+  acceptance criteria from preflight. Let it use TDD where appropriate, run
+  its verification, review the work, and create the one Task commit in its
+  defined order. Do not replace or duplicate its review or commit steps.
 - Do not fetch or mutate Azure Boards for each file change, test run, or commit
   attempt.
 - If implementation fails or verification is incomplete, do not close the Task.
