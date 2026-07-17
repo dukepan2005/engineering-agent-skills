@@ -1,0 +1,4 @@
+interface:
+  display_name: "Azure DevOps Boards"
+  short_description: "Safely manage Azure Boards work items and links"
+  default_prompt: "Use $azure-devops-boards-skill to create or update Azure Boards work items safely."
