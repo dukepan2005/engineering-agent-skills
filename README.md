@@ -14,13 +14,35 @@ its own triggering and runtime instructions.
 
 ## Install a Skill
 
-Clone this repository, then copy the desired directory from `skills/` into the
-personal skill directory used by your agent host. For example, Codex discovers
-skills from `~/.codex/skills/<skill-name>/`; Claude Code uses its corresponding
-personal skill directory.
+Use the [`skills`](https://skills.sh/) CLI. List the Skills in this repository:
 
-Each skill is self-contained. Preserve its relative `scripts/`, `references/`,
-`agents/`, and `tests/` directories when installing it.
+```bash
+npx skills add dukepan2005/engineering-agent-skills --list --full-depth
+```
+
+Install one Skill globally for Codex:
+
+```bash
+npx skills add dukepan2005/engineering-agent-skills \
+  --skill implementation-preread --agent codex --global --full-depth
+```
+
+Install one Skill globally for Claude Code:
+
+```bash
+npx skills add dukepan2005/engineering-agent-skills \
+  --skill azure-devops-boards-skill --agent claude-code --global --full-depth
+```
+
+Install every Skill for every supported agent host:
+
+```bash
+npx skills add dukepan2005/engineering-agent-skills --all --global --full-depth
+```
+
+Omit `--global` to install into the current project instead. Omit the explicit
+`--agent` option to let the CLI detect the active host. Use `npx skills update
+--global` later to update installed global Skills.
 
 ## Development
 

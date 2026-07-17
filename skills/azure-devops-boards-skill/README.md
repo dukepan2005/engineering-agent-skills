@@ -36,15 +36,13 @@ If Azure CLI is installed outside a Homebrew location, set `AZURE_CLI_PYTHON` to
 
 ## Installation
 
-Clone this collection repository, then copy the Azure Boards Skill directory
-into the personal Skill directory used by your agent host.
+Install this Skill from the collection repository with the `skills` CLI.
 
 ### Codex
 
 ```bash
-git clone https://github.com/dukepan2005/engineering-agent-skills.git /tmp/engineering-agent-skills
-cp -R /tmp/engineering-agent-skills/skills/azure-devops-boards-skill \
-  ~/.codex/skills/azure-devops-boards-skill
+npx skills add dukepan2005/engineering-agent-skills \
+  --skill azure-devops-boards-skill --agent codex --global --full-depth
 ```
 
 Invoke it with `$azure-devops-boards-skill`.
@@ -52,9 +50,8 @@ Invoke it with `$azure-devops-boards-skill`.
 ### Claude Code
 
 ```bash
-git clone https://github.com/dukepan2005/engineering-agent-skills.git /tmp/engineering-agent-skills
-cp -R /tmp/engineering-agent-skills/skills/azure-devops-boards-skill \
-  ~/.claude/skills/azure-devops-boards-skill
+npx skills add dukepan2005/engineering-agent-skills \
+  --skill azure-devops-boards-skill --agent claude-code --global --full-depth
 ```
 
 Invoke it with `/azure-devops-boards-skill`.
