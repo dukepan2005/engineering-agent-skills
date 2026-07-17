@@ -51,8 +51,8 @@ revision.
 - Use the implementation and verification phase of `$implement` for this Task:
   use TDD where appropriate, run regular typechecks and focused tests, then the
   full required suite. Do **not** execute its terminal `$code-review` or commit
-  directives; this wrapper replaces those steps because `$code-review` only
-  accepts committed `HEAD` history.
+  directives; this wrapper owns those steps so its review has an explicit
+  working-tree baseline and Azure closeout remains last.
 - Before any commit, invoke `$precommit-code-review` with the recorded baseline
   and the preflight acceptance criteria. It reviews the uncommitted worktree
   diff on separate Standards and Spec axes.

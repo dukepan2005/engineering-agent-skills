@@ -6,8 +6,8 @@ description: "Review one Task's uncommitted worktree diff before commit along se
 # Pre-Commit Code Review
 
 Review uncommitted work. Do not create, amend, or require a commit for review.
-This is deliberately different from `$code-review`, which reviews committed
-`HEAD` history.
+Use it to make the working-tree review boundary explicit while preserving
+`$implement`'s required order: review first, then commit.
 
 ## Require a Clean Baseline
 
