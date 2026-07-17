@@ -38,35 +38,39 @@ silently resolving them.
 - Record missing information and its effect on confidence.
 - Stop after returning the report.
 
-## Choose the Model
+## Classify the Task
 
-Choose only between `gpt-5.6-terra` and `gpt-5.6-sol`.
+Choose the lowest-cost profile that has a credible path to meeting acceptance
+criteria and focused verification requirements. Do not assign a stronger model
+merely because a Task is large.
 
-- Choose `gpt-5.6-terra` for bounded, well-specified, localized, repetitive, or
-  mechanical work with clear verification.
-- Choose `gpt-5.6-sol` for cross-module or cross-repository contracts,
-  architecture decisions, concurrency, lifecycle, migrations, compatibility,
-  security, data integrity, deletion or cutover work, or material ambiguity.
+For each Task, assess only source-backed evidence:
 
-Do not assign a stronger model merely because a Task is large. Base the choice
-on reasoning risk, coupling, reversibility, and the quality of the specification.
+- Ambiguity: are acceptance criteria, ownership, and expected behavior clear?
+- Coupling: how many modules, repositories, contracts, or lifecycle stages change?
+- Failure cost: could a wrong change cause data loss, security exposure,
+  compatibility breakage, or difficult rollback?
+- Reasoning hazards: concurrency, ordering, migrations, deletion/cutover,
+  negative paths, or non-local invariants.
+- Verification strength: do focused tests, types, migrations, or established
+  patterns independently detect a wrong implementation?
 
-## Choose the Thinking Level
+## Choose the Implementation Profile
 
-Recommend the lowest level that is likely to complete the Task reliably:
+Choose only between `gpt-5.6-terra` and `gpt-5.6-sol`:
 
-- `medium`: Clear acceptance criteria, narrow surface, established pattern, and
-  focused verification.
-- `high`: Normal non-trivial implementation, multiple coordinated files, or
-  moderate edge-case analysis.
-- `xhigh`: Concrete architectural ambiguity, concurrency or ordering hazards,
-  compatibility or migration risk, cross-repository coordination, or difficult
-  negative-path reasoning.
+- Choose `gpt-5.6-terra` when scope is bounded and current authority plus
+  focused verification make incorrect assumptions cheap to detect.
+- Choose `gpt-5.6-sol` when unresolved ambiguity, cross-boundary coupling, or
+  failure cost requires stronger judgment before implementation.
 
-Do not recommend `max` as an initial assignment. List it only as a later
-escalation option when a specific blocker remains after current authority and
-code have been re-read. Prefer changing from Terra to Sol before escalating to
-`max`.
+Use `medium` by default for a clear, bounded Task with a credible focused
+verification plan. Use `high` only for multiple coordinated changes or one
+material reasoning hazard. Use `xhigh` only when high failure cost combines with
+concrete uncertainty, concurrency/ordering, migration/compatibility, or
+cross-repository risk. Never recommend `max` initially; name it only as an
+escalation after a fresh authority/code read and an unsuccessful lower-effort
+attempt leave a specific issue unresolved.
 
 ## Explain Every Recommendation
 
@@ -74,8 +78,7 @@ For each Task:
 
 1. Cite the scope and risk signals that drive the choice.
 2. Give one primary recommendation, not a menu.
-3. Explain why a cheaper model or lower level is insufficient when recommending
-   Sol or `xhigh`.
+3. Explain why a lower-cost model or lower reasoning level is insufficient.
 4. Give concrete escalation triggers that can be checked during implementation.
 5. Assign confidence as `high`, `medium`, or `low`, based on source completeness.
 
@@ -96,16 +99,16 @@ Use this structure:
 
 ## Recommendations
 
-| Task | Scope summary | Model | Thinking level | Primary reason | Confidence |
+| Task | Scope summary | Model | Thinking level | Why not lower | Confidence |
 |---|---|---|---|---|---|
-| AB#... | ... | gpt-5.6-terra | high | ... | high |
+| AB#... | ... | gpt-5.6-terra | medium | ... | high |
 
 ## Task analysis
 
 ### AB#... — <title>
 - Evidence and complexity signals:
-- Recommended profile:
-- Why this is the lowest reliable profile:
+- Model and thinking level:
+- Why this is the lowest-cost reliable profile:
 - Escalation triggers:
 - Unknowns:
 

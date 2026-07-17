@@ -47,6 +47,7 @@ Read the repository's tracker instructions before operating. Treat its work-item
 ```bash
 sh "$HELPER" current-sprint
 sh "$HELPER" show --id 61
+sh "$HELPER" implement-preflight --id 61
 
 sh "$HELPER" create \
   --type Task --title 'Implement contract' \
@@ -61,8 +62,26 @@ sh "$HELPER" add-comment \
 
 sh "$HELPER" add-link \
   --id 124 --kind predecessor --target-id 123
+
+sh "$HELPER" close-task \
+  --id 123 --expected-rev 8 --state Closed --comment-file /tmp/completion.md
 ```
 
 Add `--apply` after validation. For `predecessor`, `--target-id` blocks the current `--id`. For `parent`, the target is the current item's parent. Re-adding an existing relation returns `unchanged`.
+
+## Keep implementation synchronization compact
+
+For one Task, run `implement-preflight` once before editing. It returns a compact
+snapshot of the revision, state, title, structured acceptance criteria (or the
+full Description when it cannot safely extract them), and relation IDs. Keep it
+as the scope authority for the current thread. Re-run only after a task, branch,
+or session change, or when a scope conflict appears.
+
+At closeout, run `close-task` once without `--apply`, then repeat it with
+`--apply`. Pass the preflight `rev` as `--expected-rev` to avoid an extra
+pre-write read; the JSON Patch revision test still fails safely if the work item
+changed. `close-task` can update Description and state in one work-item mutation
+and post one Markdown completion comment. It verifies both persisted results;
+the two Azure operations are not represented as atomic.
 
 Read [references/azure-boards-api.md](references/azure-boards-api.md) only when endpoint behavior or relation semantics need investigation.

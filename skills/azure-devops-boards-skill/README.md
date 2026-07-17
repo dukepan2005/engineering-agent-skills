@@ -10,6 +10,7 @@ It provides a shared, project-neutral implementation for:
 - Posting comments with explicit Markdown format
 - Creating native parent, predecessor, and related links
 - Validating mutations before writing and verifying persisted results afterward
+- Producing compact implementation preflight snapshots and closeout summaries
 
 The authoritative agent workflow is in [`SKILL.md`](SKILL.md). Repository-specific tracker policies remain authoritative for work-item types, states, tags, Sprint selection, and delivery gates.
 
@@ -85,6 +86,7 @@ Read operations execute immediately:
 ```bash
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" current-sprint
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" show --id 61
+sh "$SKILL_DIR/scripts/azure-devops-boards.sh" implement-preflight --id 61
 ```
 
 Prepare long descriptions and comments as Markdown files. Validate a Task creation without writing:
@@ -123,6 +125,23 @@ sh "$SKILL_DIR/scripts/azure-devops-boards.sh" add-link \
 ```
 
 For `predecessor`, the target work item blocks the current work item. For `parent`, the target is the current work item's parent. Re-adding an existing relation returns `unchanged`.
+
+For an implementation Task, use one compact preflight snapshot before editing,
+then validate and apply one closeout command at the end:
+
+```bash
+sh "$SKILL_DIR/scripts/azure-devops-boards.sh" close-task \
+  --id 123 --expected-rev 8 --state Closed --comment-file /tmp/completion.md
+
+sh "$SKILL_DIR/scripts/azure-devops-boards.sh" close-task --apply \
+  --id 123 --expected-rev 8 --state Closed --comment-file /tmp/completion.md
+```
+
+`implement-preflight` retains structured acceptance criteria, or falls back to
+the complete Description when it cannot safely identify them. `close-task`
+combines the final work-item patch and one Markdown comment, then verifies both
+persisted results. The two Azure operations remain separately verified rather
+than being presented as an atomic transaction.
 
 ## Workflow integration
 

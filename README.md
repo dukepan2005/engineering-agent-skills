@@ -9,8 +9,38 @@ its own triggering and runtime instructions.
 | Skill | Purpose |
 |---|---|
 | [`azure-devops-boards-skill`](skills/azure-devops-boards-skill/) | Safely read and mutate Azure DevOps Boards work items through the locally authenticated Azure CLI. |
-| [`implementation-preread`](skills/implementation-preread/) | Produce a read-only, source-backed implementation readiness brief before implementation. |
+| [`azure-task-implement`](skills/azure-task-implement/) | Wrap `$implement` with compact Azure Boards Task preflight and closeout. |
 | [`task-model-planner`](skills/task-model-planner/) | Recommend the lowest reliable `gpt-5.6-terra` or `gpt-5.6-sol` profile and thinking level for each Task. |
+
+## Third-Party Dependency
+
+`azure-task-implement` wraps the third-party `$implement` workflow. Installing
+this repository does **not** install Skills from
+[`mattpocock/skills`](https://github.com/mattpocock/skills). Before using the
+wrapper, install its required `$implement` and `$code-review` Skills separately
+for the same agent host; `$tdd` is recommended because `$implement` uses it
+when appropriate.
+
+For Codex, for example:
+
+```bash
+npx skills@latest add mattpocock/skills
+```
+
+The wrapper checks these dependencies together with this repository's
+`$azure-devops-boards-skill` before it begins a Task. It stops and reports a
+missing dependency; it never installs one automatically.
+
+`$azure-devops-boards-skill` also requires a locally authenticated Azure CLI
+with the Azure DevOps extension:
+
+```bash
+az extension add --name azure-devops
+az login
+```
+
+See the [Azure Boards Skill guide](skills/azure-devops-boards-skill/README.md)
+for connection variables and Azure CLI Python configuration.
 
 ## Install a Skill
 
@@ -18,13 +48,6 @@ Use the [`skills`](https://skills.sh/) CLI. List the Skills in this repository:
 
 ```bash
 npx skills add dukepan2005/engineering-agent-skills --list --full-depth
-```
-
-Install one Skill globally for Codex:
-
-```bash
-npx skills add dukepan2005/engineering-agent-skills \
-  --skill implementation-preread --agent codex --global --full-depth
 ```
 
 Install one Skill globally for Claude Code:
@@ -53,18 +76,29 @@ items. The Skill validates every mutation before it applies it; see its
 [dedicated guide](skills/azure-devops-boards-skill/README.md) for prerequisites
 and command examples.
 
-### Implementation preread
+### Azure Task delivery
 
-Invoke the Skill before starting an implementation run:
+Invoke this wrapper to implement one Azure Boards Task without reproducing a
+project-specific tracker gate:
 
 ```text
-$implementation-preread AB#169
+$azure-task-implement AB#169
 ```
 
-It returns a read-only readiness brief covering current authority, scope, code
-map, risks, a recommended implementation profile, and a compact handoff. Select
-the preread model outside the Skill; the later implementation must independently
-re-read current authority and code.
+It runs one compact tracker preflight, invokes `$implement`, and performs a
+validated Markdown-safe closeout after successful verification and commit. Use
+`$azure-task-implement AB#169 --state Closed` only when the final state is
+explicitly known; otherwise the wrapper preserves the current state.
+
+#### Dependencies
+
+This wrapper does not bundle or install third-party Skills. Before invoking it,
+install `$implement` and `$code-review` from
+[`mattpocock/skills`](https://github.com/mattpocock/skills), and install this
+repository's `$azure-devops-boards-skill` for the same agent host. It checks for
+all three before reading or changing a Task and stops with the relevant install
+command if one is unavailable. `$tdd` from `mattpocock/skills` is recommended,
+because `$implement` uses it where appropriate.
 
 ### Task model planning
 
@@ -81,12 +115,13 @@ It returns one cost-aware recommendation per Task: `gpt-5.6-terra` or
 
 ```text
 $task-model-planner <Story>
-$implementation-preread <Task>
-$implement <Task>
+$azure-task-implement <Task>
 ```
 
 `$implement` is supplied by the agent host or your own installed implementation
-workflow. The two planning Skills never edit code, Git state, or Azure Boards.
+workflow. `$azure-task-implement` requires it plus
+`$azure-devops-boards-skill`; the planning Skill never edits code, Git state, or
+Azure Boards.
 
 ## Development
 

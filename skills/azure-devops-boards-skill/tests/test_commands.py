@@ -17,7 +17,7 @@ sys.path.insert(0, str(HERE))                     # tests/   → fakes
 sys.path.insert(0, str(HERE.parent / "scripts"))  # scripts/ → azure_devops_boards
 
 from fakes import FakeClient, PatchOp  # noqa: E402
-from azure_devops_boards import RELATIONS, add_comment, add_link, create, update  # noqa: E402
+from azure_devops_boards import RELATIONS, add_comment, add_link, close_task, create, preflight, update  # noqa: E402
 
 ORG, PROJECT = "https://dev.azure.com/o", "P"
 
@@ -145,6 +145,61 @@ class AddCommentCommandTests(unittest.TestCase):
         with self.assertRaises(RuntimeError) as cm:
             _run(add_comment, FakeClient(), self._args(apply=True, text="   "))
         self.assertIn("Comment must not be empty.", str(cm.exception))
+
+
+class ImplementationLifecycleTests(unittest.TestCase):
+    ID = 42
+
+    def _seeded(self):
+        fake = FakeClient.with_item(self.ID, rev=3)
+        fake.items[self.ID]["fields"].update({
+            "System.Title": "Implement compact Boards flow",
+            "System.State": "New",
+            "System.Description": "- [ ] Keep scope\n- [x] Preserve safety",
+        })
+        fake.items[self.ID]["relations"] = [{"rel": RELATIONS["predecessor"], "url": f"{ORG}/{PROJECT}/_apis/wit/workItems/7"}]
+        return fake
+
+    def test_preflight_emits_compact_scope_and_relation_summary(self):
+        out = _run(preflight, self._seeded(), SimpleNamespace(organization=ORG, project=PROJECT, id=self.ID))
+        self.assertEqual(out["id"], self.ID)
+        self.assertEqual(out["rev"], 3)
+        self.assertEqual(out["scope"], {"source": "markdown-checklist", "acceptanceCriteria": ["- [ ] Keep scope", "- [x] Preserve safety"]})
+        self.assertEqual(out["relations"], [{"rel": RELATIONS["predecessor"], "targetId": 7}])
+
+    def _close_args(self, apply, expected_rev=3, state="Closed"):
+        return SimpleNamespace(organization=ORG, project=PROJECT, id=self.ID, apply=apply,
+                               expected_rev=expected_rev, state=state, description_file=None,
+                               comment_file=_file("## Completion\nDone"))
+
+    def test_close_task_validates_without_writing(self):
+        fake = self._seeded()
+        out = _run(close_task, fake, self._close_args(apply=False))
+        self.assertEqual(out["mode"], "validated")
+        self.assertEqual(fake.applies, 0)
+        self.assertEqual(fake.comments, {})
+
+    def test_close_task_applies_one_mutation_and_one_markdown_comment(self):
+        fake = self._seeded()
+        out = _run(close_task, fake, self._close_args(apply=True))
+        self.assertEqual(out, {"mode": "applied", "id": self.ID, "rev": 4,
+                               "fields": {"System.State": "Closed"}, "commentId": 1})
+        self.assertEqual(fake.applies, 1)
+        self.assertEqual(len(fake.comments[self.ID]), 1)
+
+    def test_close_task_stale_preflight_revision_prevents_patch_and_comment(self):
+        fake = self._seeded()
+        with self.assertRaises(RuntimeError):
+            _run(close_task, fake, self._close_args(apply=True, expected_rev=2))
+        self.assertEqual(fake.applies, 0)
+        self.assertEqual(fake.comments, {})
+
+    def test_close_task_comment_only_does_not_send_an_empty_work_item_patch(self):
+        fake = self._seeded()
+        out = _run(close_task, fake, self._close_args(apply=True, state=None))
+        self.assertEqual(out["rev"], None)
+        self.assertEqual(fake.applies, 0)
+        self.assertEqual(len(fake.comments[self.ID]), 1)
 
 
 if __name__ == "__main__":
