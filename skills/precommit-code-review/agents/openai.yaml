@@ -1,0 +1,6 @@
+interface:
+  display_name: "Pre-Commit Code Review"
+  short_description: "Review an uncommitted task diff before commit"
+  default_prompt: "Use $precommit-code-review to review the worktree since the task baseline commit."
+policy:
+  allow_implicit_invocation: false
