@@ -60,6 +60,16 @@ validated Markdown-safe closeout after successful verification and commit. Use
 `$azure-task-implement AB#169 --state Closed` only when the final state is
 explicitly known; otherwise the wrapper preserves the current state.
 
+#### Dependencies
+
+This wrapper does not bundle or install third-party Skills. Before invoking it,
+install `$implement` and `$code-review` from
+[`mattpocock/skills`](https://github.com/mattpocock/skills), and install this
+repository's `$azure-devops-boards-skill` for the same agent host. It checks for
+all three before reading or changing a Task and stops with the relevant install
+command if one is unavailable. `$tdd` from `mattpocock/skills` is recommended,
+because `$implement` uses it where appropriate.
+
 ### Task model planning
 
 Invoke the Skill to plan a Story or a set of tickets:

@@ -10,6 +10,29 @@ Use `$azure-devops-boards-skill` for all tracker operations. Keep repository
 guidance authoritative for code, tests, state names, and checklist policy; this
 Skill provides the reusable lifecycle, not a replacement project process.
 
+## Require Dependencies Before Work
+
+Before reading a Task, confirm that the current host can invoke all of these
+Skills:
+
+- `$implement` and `$code-review` from `mattpocock/skills`
+- `$azure-devops-boards-skill` from this repository
+
+If any is unavailable, stop without inspecting or changing the tracker, code,
+or Git state. State the missing Skill and print only the relevant install
+command for the current host, for example:
+
+```bash
+npx skills@latest add mattpocock/skills \
+  --skill implement --skill code-review --agent codex --global
+
+npx skills@latest add dukepan2005/engineering-agent-skills \
+  --skill azure-devops-boards-skill --agent codex --global
+```
+
+Replace `codex` with the active host when necessary. Do not install a missing
+dependency during a delivery run.
+
 ## Start Once
 
 1. Read repository guidance and resolve the Azure Boards helper through
