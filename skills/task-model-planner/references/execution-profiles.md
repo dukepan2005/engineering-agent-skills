@@ -13,6 +13,13 @@ planner report or orchestrator dispatch.
 | `sol-high` | `gpt-5.6-sol` | `high` | `sol-medium` |
 | `sol-xhigh` | `gpt-5.6-sol` | `xhigh` | `sol-high` |
 
+Use this regular planning and escalation order:
+
+`terra-medium` → `terra-high` → `sol-medium` → `sol-high`
+
+Treat every `xhigh` profile as an exception outside the regular ladder. Apply
+the gates in `../SKILL.md` before selecting one.
+
 Treat the profile ID as the planner and orchestrator interface. Resolve the
 model and reasoning effort only when spawning the child agent.
 
