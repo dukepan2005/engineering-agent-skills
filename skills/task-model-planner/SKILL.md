@@ -1,6 +1,6 @@
 ---
 name: task-model-planner
-description: Analyze a Story, ticket, or implementation specification and produce a source-backed report recommending an implementation model and thinking level for each Task. Use when the user asks which model, reasoning effort, or cost-aware execution profile should implement a Story's child Tasks or a set of tickets.
+description: Analyze a Story, ticket, or implementation specification and produce a source-backed report recommending one named execution profile for each Task. Use when the user asks which model profile, reasoning effort, or cost-aware execution configuration should implement a Story's child Tasks or a set of tickets.
 ---
 
 # Task Model Planner
@@ -55,22 +55,23 @@ For each Task, assess only source-backed evidence:
 - Verification strength: do focused tests, types, migrations, or established
   patterns independently detect a wrong implementation?
 
-## Choose the Implementation Profile
+## Choose the Execution Profile
 
-Choose only between `gpt-5.6-terra` and `gpt-5.6-sol`:
+Read [the canonical execution-profile registry](references/execution-profiles.md)
+before selecting a profile. Output only its profile ID; do not output a free-form
+model and thinking-level pair.
 
-- Choose `gpt-5.6-terra` when scope is bounded and current authority plus
-  focused verification make incorrect assumptions cheap to detect.
-- Choose `gpt-5.6-sol` when unresolved ambiguity, cross-boundary coupling, or
-  failure cost requires stronger judgment before implementation.
+Choose a Terra profile when scope is bounded and current authority plus focused
+verification make incorrect assumptions cheap to detect. Choose a Sol profile
+when unresolved ambiguity, cross-boundary coupling, or failure cost requires
+stronger judgment before implementation.
 
 Use `medium` by default for a clear, bounded Task with a credible focused
 verification plan. Use `high` only for multiple coordinated changes or one
 material reasoning hazard. Use `xhigh` only when high failure cost combines with
 concrete uncertainty, concurrency/ordering, migration/compatibility, or
-cross-repository risk. Never recommend `max` initially; name it only as an
-escalation after a fresh authority/code read and an unsuccessful lower-effort
-attempt leave a specific issue unresolved.
+cross-repository risk. Do not invent profiles, and do not recommend `max` as an
+initial profile.
 
 ## Explain Every Recommendation
 
@@ -78,19 +79,24 @@ For each Task:
 
 1. Cite the scope and risk signals that drive the choice.
 2. Give one primary recommendation, not a menu.
-3. Explain why a lower-cost model or lower reasoning level is insufficient.
+3. Explain why a lower-cost profile is insufficient.
 4. Give concrete escalation triggers that can be checked during implementation.
 5. Assign confidence as `high`, `medium`, or `low`, based on source completeness.
 
-Keep sequencing separate from model selection. Different Tasks under one Story
+Keep sequencing separate from profile selection. Different Tasks under one Story
 may use different profiles.
+
+Always return every planned Task exactly once in execution order. Derive the
+order from authoritative blocker, prerequisite, replacement, and
+cross-repository relations. When no authority imposes an order, use the order
+in which the Tasks were read and label it `no dependency; stable order`.
 
 ## Return the Report
 
 Use this structure:
 
 ```markdown
-# Task Implementation Model Report: <Story or ticket>
+# Task Execution Profile Report: <Story or ticket>
 
 ## Authority snapshot
 - Source, revision, state, and relations
@@ -99,22 +105,26 @@ Use this structure:
 
 ## Recommendations
 
-| Task | Scope summary | Model | Thinking level | Why not lower | Confidence |
-|---|---|---|---|---|---|
-| AB#... | ... | gpt-5.6-terra | medium | ... | high |
+| Task | Scope summary | Execution profile | Why not lower | Confidence |
+|---|---|---|---|---|
+| AB#... | ... | terra-medium | ... | high |
 
 ## Task analysis
 
 ### AB#... — <title>
 - Evidence and complexity signals:
-- Model and thinking level:
+- Execution profile:
 - Why this is the lowest-cost reliable profile:
 - Escalation triggers:
 - Unknowns:
 
+## Execution plan
+
+1. AB#... — dependency or ordering reason
+2. AB#... — dependency or ordering reason
+
 ## Cost and sequencing summary
-- Tasks suitable for Terra:
-- Tasks requiring Sol:
+- Tasks by execution profile:
 - Recommended execution order when authority defines one:
 - Conditions that require re-planning:
 

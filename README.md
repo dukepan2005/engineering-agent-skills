@@ -10,7 +10,8 @@ its own triggering and runtime instructions.
 |---|---|
 | [`azure-devops-boards-skill`](skills/azure-devops-boards-skill/) | Safely read and mutate Azure DevOps Boards work items through the locally authenticated Azure CLI. |
 | [`azure-task-implement`](skills/azure-task-implement/) | Wrap `$implement` with compact Azure Boards Task preflight and closeout. |
-| [`task-model-planner`](skills/task-model-planner/) | Recommend the lowest reliable `gpt-5.6-terra` or `gpt-5.6-sol` profile and thinking level for each Task. |
+| [`task-model-planner`](skills/task-model-planner/) | Recommend one named, lowest-reliable execution profile for each Task. |
+| [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver a Story's Azure Tasks in order, each in a named-profile subagent. |
 
 ## Third-Party Dependency
 
@@ -108,8 +109,9 @@ Invoke the Skill to plan a Story or a set of tickets:
 $task-model-planner AB#167
 ```
 
-It returns one cost-aware recommendation per Task: `gpt-5.6-terra` or
-`gpt-5.6-sol`, a thinking level, evidence, confidence, and escalation triggers.
+It returns one cost-aware execution-profile ID per Task, plus evidence,
+confidence, and escalation triggers. The planner's bundled registry is the
+single mapping from profile ID to model and reasoning effort.
 
 ### Recommended delivery flow
 
@@ -117,6 +119,22 @@ It returns one cost-aware recommendation per Task: `gpt-5.6-terra` or
 $task-model-planner <Story>
 $azure-task-implement <Task>
 ```
+
+### Profile-planned sequential delivery
+
+Use the orchestrator when every Task in a Story or explicit set should be
+planned first and then delivered sequentially by subagents with the recommended
+execution profile:
+
+```text
+$azure-task-orchestrator AB#168
+```
+
+It resolves each profile ID through `$task-model-planner`'s canonical registry,
+then creates a named subagent with that exact model and reasoning effort. It
+validates the planner's ordered report before dispatching any Task and stops the
+sequence on the first unsuccessful worker; it never substitutes the parent
+model or runs Tasks in parallel.
 
 `$implement` is supplied by the agent host or your own installed implementation
 workflow. `$azure-task-implement` requires it plus
