@@ -134,9 +134,10 @@ It resolves each profile ID through `$task-model-planner`'s canonical registry,
 then creates a named subagent with that exact model and reasoning effort. If
 the host rejects the requested effort before the worker starts, it may make one
 same-model, lower-effort retry from that registry and records both profiles.
-It validates the planner's ordered report before dispatching any Task and stops the
-sequence on the first unsuccessful worker; it never substitutes the parent
-model or runs Tasks in parallel.
+It validates and displays the planner's ordered report, then waits for explicit
+user confirmation before dispatching any Task. It stops the sequence on the
+first unsuccessful worker; it never substitutes the parent model or runs Tasks
+in parallel.
 
 `$implement` is supplied by the agent host or your own installed implementation
 workflow. `$azure-task-implement` requires it plus

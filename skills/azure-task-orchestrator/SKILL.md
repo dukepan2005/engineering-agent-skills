@@ -5,9 +5,9 @@ description: Plan and deliver all Tasks under an Azure DevOps Boards Story or ex
 
 # Azure Task Orchestrator
 
-Create one read-only execution-profile plan, validate it, then run exactly one Azure Task
-delivery worker at a time. Do not implement, review, or close Tasks in the
-orchestrator itself.
+Create one read-only execution-profile plan, validate it, obtain the user's
+confirmation, then run exactly one Azure Task delivery worker at a time. Do not
+implement, review, or close Tasks in the orchestrator itself.
 
 ## Require Capabilities Before Work
 
@@ -42,6 +42,24 @@ the parent agent or fall back to the parent's profile.
    stale against a user-reported scope change, or contains an unsupported
    profile. Report the mismatch and request a corrected plan. Do not infer an
    order or profile from report prose.
+
+## Confirm the Validated Plan
+
+Before spawning any worker, present the complete validated plan in its planned
+order. For every Task, include its ID, title, planned profile ID, resolved model
+and reasoning effort, pre-start capacity fallback if any, and order reason.
+State that confirmation authorizes sequential delivery, including code changes,
+one commit per successful Task, and Azure Boards closeout.
+
+Wait for an explicit user confirmation of that displayed plan, for example
+`确认执行该计划` or `confirm this plan`. Do not treat a prior approval, an
+unrelated `ok`, silence, or a request to inspect the plan as confirmation. Do
+not spawn a worker, modify code or Git state, or mutate Azure Boards while
+waiting.
+
+If the user changes a Task's scope, order, or profile before confirming,
+invalidate the plan and return to **Build and Validate the Plan**. A changed
+plan requires a newly displayed plan and new confirmation.
 
 ## Deliver Sequentially
 
