@@ -12,18 +12,18 @@ implement, review, or close Tasks in the orchestrator itself.
 ## Require Direct Skills Before Work
 
 Before reading tracker data or spawning a worker, use
-`$task-model-planner` and `$azure-task-implement`, plus a subagent spawn
+`/task-model-planner` and `/azure-task-implement`, plus a subagent spawn
 primitive that accepts an explicit model and reasoning effort.
 
 For each Skill, accept one of these ways to obtain its instructions:
 
-- **Skill mention:** the host exposes the corresponding `$skill-name`.
+- **Slash command:** the host exposes the corresponding enabled Skill.
 - **Context:** the current conversation supplies its complete `<skill>` body.
 - **Path:** the current conversation or host catalog supplies an absolute,
   readable `SKILL.md` path. Read that file completely before using it.
 
 When a Skill is supplied by Context or Path, follow its instructions directly
-as `$task-model-planner` or `$azure-task-implement` without adding a
+as `/task-model-planner` or `/azure-task-implement` without adding a
 host-specific invocation tool. Record how each Skill was supplied. Do not infer
 a path from a Skill name or treat an installed directory that is neither
 advertised nor supplied as available.
@@ -36,7 +36,7 @@ run the Task in the parent agent or fall back to the parent's profile.
 
 ## Build and Validate the Plan
 
-1. Run `$task-model-planner` for the Story or explicit Task set. When it is
+1. Run `/task-model-planner` for the Story or explicit Task set. When it is
    supplied by Context or Path, first read its complete supplied body or
    `SKILL.md`, then follow it directly. Treat its report as read-only planning
    guidance, not tracker authority.
@@ -96,7 +96,7 @@ For each Task in the validated execution plan:
    `$azure-task-implement` source, plus this instruction:
 
    ```text
-   Run $azure-task-implement to deliver exactly <Task ID> in the current
+   Run /azure-task-implement to deliver exactly <Task ID> in the current
    workspace and branch. When it is supplied by Context or Path, read its
    complete supplied body or resolved SKILL.md before acting. Re-read current
    tracker and repository authority; the planner is not a substitute for
