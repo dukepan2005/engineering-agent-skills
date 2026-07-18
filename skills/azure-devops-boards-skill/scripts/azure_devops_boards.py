@@ -154,7 +154,14 @@ def _evaluate(item, expectation, phase):
     if expectation.description is not None: assert_description(item, expectation.description)
     fields = item.get("fields", {})
     for field, value in expectation.fields.items():
-        if fields.get(field) != value: raise RuntimeError(f"{phase} failed for {field}.")
+        actual = fields.get(field)
+        if actual != value:
+            requested = json.dumps(value, ensure_ascii=False)
+            returned = json.dumps(actual, ensure_ascii=False)
+            raise RuntimeError(
+                f"{phase} failed for {field}: requested {requested}, "
+                f"but Azure returned {returned}."
+            )
     if expectation.relation is not None:
         rel, url = expectation.relation
         if not _has_relation(item, rel, url): raise RuntimeError(f"{phase} failed for relation {rel}.")
