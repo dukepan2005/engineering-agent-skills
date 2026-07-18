@@ -47,31 +47,41 @@ the parent agent or fall back to the parent's profile.
 
 For each Task in the validated execution plan:
 
-1. Resolve the Task's profile ID through the canonical registry. Spawn one child
-   agent with the resolved `model` and `reasoning_effort`, and name the child
-   from both Task and profile, for example `delivery_sol_xhigh_ab_175` on
-   Codex. Do not start the next worker until this worker has returned a terminal
-   result.
-2. Give the worker only its Task ID, assigned profile ID, relevant planner evidence
-   and order reason, plus this instruction:
+1. Resolve the Task's planned profile ID through the canonical registry. On
+   Codex, call `spawn_agent` with its exact `model` and `reasoning_effort`, and
+   a normalized `task_name` containing the Task and planned profile, for example
+   `delivery_sol_xhigh_ab_175`. The name is only a task label; it does not select
+   a custom agent configuration. Do not start the next worker until this worker
+   has returned a terminal result.
+2. If the host rejects that spawn before the worker starts and explicitly reports
+   the requested reasoning effort or capacity as unavailable, read the planned
+   profile's `Pre-start capacity fallback` from the canonical registry. When it
+   has a value, retry exactly once with that profile's exact mapping and a new
+   `task_name`. Record both profile IDs and the host error. If it has no value,
+   the error is model-wide availability, the error is not recognizable, or the
+   retry fails, stop the sequence. Do not retry after a worker begins, across
+   models, or for a Task-level failure.
+3. Give the worker only its Task ID, planned profile ID, effective profile ID,
+   relevant planner evidence and order reason, plus this instruction:
 
    ```text
    Use $azure-task-implement to deliver exactly <Task ID> in the current
    workspace and branch. Re-read current tracker and repository authority;
    the planner is not a substitute for preflight. Do not implement another
-   Task. Do not change the assigned execution profile. Follow all repository
-   guidance and return the compact delivery summary.
+   Task. The effective execution profile is fixed for this worker. Follow all
+   repository guidance and return the compact delivery summary.
    ```
 
-3. Let `$azure-task-implement` own that Task's preflight, implementation,
+4. Let `$azure-task-implement` own that Task's preflight, implementation,
    verification, review, commit, and Azure closeout. Do not duplicate any of
    those operations in the parent.
-4. Require the worker to finish before inspecting its result. Keep the shared
+5. Require the worker to finish before inspecting its result. Keep the shared
    workspace untouched while a worker runs.
-5. On a successful worker result, record its compact summary and dispatch the
+6. On a successful worker result, record its compact summary and dispatch the
    next listed Task. On any failure, incomplete verification, uncommitted
    result, blocker, or uncertain closeout, stop immediately. Do not dispatch
-   later Tasks, retry at a stronger profile, or re-plan silently.
+   later Tasks, retry at a stronger profile, use a lower profile outside the
+   pre-start capacity rule, or re-plan silently.
 
 Run only one delivery worker at a time even when Tasks look independent. This
 preserves the clean-worktree requirement of `$azure-task-implement`, preserves
@@ -80,8 +90,8 @@ auditable.
 
 ## Report
 
-Return one ordered summary with, for every completed Task, the assigned
-execution profile ID, worker-reported commit and verification, final tracker
-state, and closeout result. For a stopped run, identify the Task that stopped
-the sequence, retain earlier completed results, and state that later Tasks were
-not dispatched.
+Return one ordered summary with, for every completed Task, the planned and
+effective execution profile IDs, any pre-start capacity fallback error,
+worker-reported commit and verification, final tracker state, and closeout
+result. For a stopped run, identify the Task that stopped the sequence, retain
+earlier completed results, and state that later Tasks were not dispatched.
