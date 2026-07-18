@@ -9,25 +9,38 @@ Create one read-only execution-profile plan, validate it, obtain the user's
 confirmation, then run exactly one Azure Task delivery worker at a time. Do not
 implement, review, or close Tasks in the orchestrator itself.
 
-## Require Capabilities Before Work
+## Require Direct Skill Commands Before Work
 
-Before reading tracker data or spawning a worker, confirm that the host can
-invoke all of the following:
+Before reading tracker data or spawning a worker, use the direct Skill commands
+`/task-model-planner` and `/azure-task-implement`, plus a subagent spawn
+primitive that accepts an explicit model and reasoning effort.
 
-- `$task-model-planner`
-- `$azure-task-implement`
-- a subagent spawn primitive that accepts an explicit model and reasoning effort
+For each direct Skill command, accept one of these ways to obtain its
+instructions:
+
+- **Slash command:** the host exposes the corresponding direct command.
+- **Context:** the current conversation supplies its complete `<skill>` body.
+- **Path:** the current conversation or host catalog supplies an absolute,
+  readable `SKILL.md` path. Read that file completely before using it.
+
+When a Skill is supplied by Context or Path, follow its instructions directly
+as `/task-model-planner` or `/azure-task-implement` without adding a
+host-specific invocation tool. Record how each Skill was supplied. Do not infer
+a path from a Skill name or treat an installed directory that is neither
+advertised nor supplied as available.
 
 On Codex, use `spawn_agent` with `model` and `reasoning_effort`. On another
 host, use its equivalent only when it can set both values for each child. Stop
-without reading or changing code, Git state, or Azure Boards if any capability
-is unavailable. State the missing capability; do not silently run the Task in
-the parent agent or fall back to the parent's profile.
+without reading or changing code, Git state, or Azure Boards if no usable
+source or spawn primitive is available. State what is missing; do not silently
+run the Task in the parent agent or fall back to the parent's profile.
 
 ## Build and Validate the Plan
 
-1. Invoke `$task-model-planner` for the Story or explicit Task set. Treat its
-   report as read-only planning guidance, not tracker authority.
+1. Run `/task-model-planner` for the Story or explicit Task set. When it is
+   supplied by Context or Path, first read its complete supplied body or
+   `SKILL.md`, then follow it directly. Treat its report as read-only planning
+   guidance, not tracker authority.
 2. Read `$task-model-planner`'s canonical
    `references/execution-profiles.md` registry. Resolve every profile ID from
    that one registry; do not reproduce or override its mapping here.
@@ -80,14 +93,17 @@ For each Task in the validated execution plan:
    retry fails, stop the sequence. Do not retry after a worker begins, across
    models, or for a Task-level failure.
 3. Give the worker only its Task ID, planned profile ID, effective profile ID,
-   relevant planner evidence and order reason, plus this instruction:
+   relevant planner evidence and order reason, the resolved
+   `$azure-task-implement` source, plus this instruction:
 
    ```text
-   Use $azure-task-implement to deliver exactly <Task ID> in the current
-   workspace and branch. Re-read current tracker and repository authority;
-   the planner is not a substitute for preflight. Do not implement another
-   Task. The effective execution profile is fixed for this worker. Follow all
-   repository guidance and return the compact delivery summary.
+   Run /azure-task-implement to deliver exactly <Task ID> in the current
+   workspace and branch. When it is supplied by Context or Path, read its
+   complete supplied body or resolved SKILL.md before acting. Re-read current
+   tracker and repository authority; the planner is not a substitute for
+   preflight. Do not implement another Task. The effective execution profile is
+   fixed for this worker. Follow all repository guidance and return the compact
+   delivery summary.
    ```
 
 4. Let `$azure-task-implement` own that Task's preflight, implementation,
@@ -108,8 +124,9 @@ auditable.
 
 ## Report
 
-Return one ordered summary with, for every completed Task, the planned and
-effective execution profile IDs, any pre-start capacity fallback error,
-worker-reported commit and verification, final tracker state, and closeout
-result. For a stopped run, identify the Task that stopped the sequence, retain
-earlier completed results, and state that later Tasks were not dispatched.
+Return one ordered summary with how the planning and delivery Skills were
+supplied. For every completed Task, include the planned and effective execution
+profile IDs, any pre-start capacity fallback error, worker-reported commit and
+verification, final tracker state, and closeout result. For a stopped run,
+identify the Task that stopped the sequence, retain earlier completed results,
+and state that later Tasks were not dispatched.

@@ -137,7 +137,10 @@ same-model, lower-effort retry from that registry and records both profiles.
 It validates and displays the planner's ordered report, then waits for explicit
 user confirmation before dispatching any Task. It stops the sequence on the
 first unsuccessful worker; it never substitutes the parent model or runs Tasks
-in parallel.
+in parallel. It accepts a dependency Skill supplied natively by the host, as a
+complete `<skill>` block in the current context, or by an explicit readable
+`SKILL.md` path; it runs them directly as `/task-model-planner` and
+`/azure-task-implement`.
 
 `$implement` is supplied by the agent host or your own installed implementation
 workflow. `$azure-task-implement` requires it plus
