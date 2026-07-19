@@ -140,7 +140,7 @@ def _scope_summary(description):
 
 
 def preflight(args):
-    """Emit the smallest source-of-truth snapshot needed to begin one Task."""
+    """Emit the smallest source-of-truth snapshot needed to begin one work item."""
     item = connect(args)[0].read(args.id)
     fields = item.get("fields", {})
     emit({"id": item.get("id", args.id), "rev": item.get("rev"),
@@ -228,7 +228,7 @@ def add_comment(args):
 
 
 def close_task(args):
-    """Persist one final Task patch and one Markdown completion comment.
+    """Persist one final work-item patch and one Markdown completion comment.
 
     The preflight revision avoids a redundant pre-write read. The patch's rev
     test still prevents a write when the work item has changed.

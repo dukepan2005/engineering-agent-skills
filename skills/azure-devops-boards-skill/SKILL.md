@@ -71,11 +71,12 @@ Add `--apply` after validation. For `predecessor`, `--target-id` blocks the curr
 
 ## Keep implementation synchronization compact
 
-For one Task, run `implement-preflight` once before editing. It returns a compact
-snapshot of the revision, state, title, structured acceptance criteria (or the
-full Description when it cannot safely extract them), and relation IDs. Keep it
-as the scope authority for the current thread. Re-run only after a task, branch,
-or session change, or when a scope conflict appears.
+For one implementation-ready work item, run `implement-preflight` once before
+editing. It returns a compact snapshot of the revision, type, state, title,
+structured acceptance criteria (or the full Description when it cannot safely
+extract them), and relation IDs. Keep it as the scope authority for the current
+thread. Re-run only after an item, branch, or session change, or when a scope
+conflict appears.
 
 At closeout, run `close-task` once without `--apply`, then repeat it with
 `--apply`. Pass the preflight `rev` as `--expected-rev` to avoid an extra

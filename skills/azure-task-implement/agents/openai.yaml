@@ -1,6 +1,6 @@
 interface:
   display_name: "Azure Task Implement"
-  short_description: "Implement and close one Azure Boards Task"
-  default_prompt: "Use $azure-task-implement to deliver and close AB#169."
+  short_description: "Implement and close one Azure Boards work item"
+  default_prompt: "Use $azure-task-implement to deliver and close the implementation-ready Azure work item AB#169."
 policy:
   allow_implicit_invocation: false

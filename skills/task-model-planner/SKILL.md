@@ -1,6 +1,6 @@
 ---
 name: task-model-planner
-description: Analyze agent-ready Azure Tasks produced after /grill-with-docs, /to-spec, and /to-tickets, then recommend one source-backed execution profile for each Task. Use when the user asks which model profile, reasoning effort, or cost-aware execution configuration should implement a Story's child Tasks or an explicit Task set.
+description: Analyze implementation-ready Azure work items produced after /grill-with-docs, /to-spec, and /to-tickets, then recommend one source-backed execution profile for each item. Use when the user asks which model profile, reasoning effort, or cost-aware execution configuration should implement a Story's child items or an explicit work-item set, including Tasks and Bugs.
 ---
 
 # Task Model Planner
@@ -11,11 +11,12 @@ tracker.
 ## Establish the Work Set
 
 1. Read the nearest `AGENTS.md` and every repository guidance file it requires.
-2. Read the current authoritative Story or Task, including revision, state,
-   acceptance criteria, relations, comments, attachments, and linked
-   specification documents that affect scope.
-3. For a Story, analyze each directly related child Task separately. For a Task
-   set, analyze only the explicitly named items.
+2. Read the current authoritative parent or target work item, including
+   revision, state, acceptance criteria, relations, comments, attachments, and
+   linked specification documents that affect scope.
+3. For a Story, analyze each directly related implementation-ready child work
+   item separately, regardless of whether Azure labels it Task or Bug. For an
+   explicit work-item set, analyze only the named items.
 4. Read blocking, prerequisite, replacement, or cross-repository tickets only
    when they materially affect a recommendation.
 5. Use the existing Azure Boards skill and repository tracker guidance for
@@ -35,15 +36,15 @@ upstream workflow. Before choosing any profile, verify that:
 
 - the accepted decisions are recorded in the authoritative Story description
   or a linked implementation specification;
-- every Task traces to that planning authority and has bounded scope, acceptance
-  criteria, and focused verification requirements;
+- every work item traces to that planning authority and has bounded scope,
+  acceptance criteria, and focused verification requirements;
 - prerequisite, blocker, replacement, and cross-repository relations are
   present when the specification requires them;
-- the specification, Tasks, current tracker state, and any inspected current
+- the specification, work items, current tracker state, and any inspected current
   code do not materially conflict.
 
 If an artifact is missing or materially inconsistent, return an
-`Input not ready` report listing the affected Tasks and evidence, then stop
+`Input not ready` report listing the affected work items and evidence, then stop
 without recommending profiles. Do not compensate for an incomplete planning
 workflow by selecting Sol or a higher reasoning effort.
 
@@ -52,23 +53,23 @@ workflow by selecting Sol or a higher reasoning effort.
 - Do not edit code, documents, Git state, configuration, or tracker items.
 - Do not build, test, migrate, generate, install, commit, push, or invoke
   `$implement`.
-- Do not split, rewrite, create, or reprioritize Tasks.
+- Do not split, rewrite, create, reprioritize, or change the type of work items.
 - Record missing information and its effect on confidence.
 - Stop after returning the report.
 
-## Classify the Task
+## Classify the Work Item
 
 Choose the lowest-cost profile that has a credible path to meeting acceptance
 criteria and focused verification requirements. Do not assign a stronger model
-merely because a Task is large or crosses a module, contract, lifecycle stage,
-or repository.
+merely because a work item is large or crosses a module, contract, lifecycle
+stage, or repository.
 
 Classify only residual implementation uncertainty that remains after the
 upstream design and decomposition workflow. Do not charge again for decisions,
-scope, coupling, or ordering already resolved by the specification and Task
-graph.
+scope, coupling, or ordering already resolved by the specification and
+work-item graph.
 
-For each ready Task, assess only source-backed evidence:
+For each ready work item, assess only source-backed evidence:
 
 - Residual judgment: must the implementer still choose product semantics,
   ownership, architecture, lifecycle behavior, or a boundary contract?
@@ -100,8 +101,8 @@ profiles for regular planning:
   required.
 
 Treat `terra-high` and `sol-medium` as the two primary profiles for agent-ready
-Tasks. Use `terra-medium` for genuinely straightforward work and `sol-high` for
-the compounded case.
+work items. Use `terra-medium` for genuinely straightforward work and
+`sol-high` for the compounded case.
 
 Use this regular escalation order:
 
@@ -119,8 +120,9 @@ independently verifiable edits span multiple modules or repositories.
 
 Choose Sol only when source-backed residual judgment remains, such as:
 
-- the specification, Task, current code, or another current authority conflicts;
-- the Task explicitly delegates a material product, domain, or architectural
+- the specification, work item, current code, or another current authority
+  conflicts;
+- the work item explicitly delegates a material product, domain, or architectural
   decision to the implementer;
 - the implementation must invent or renegotiate a boundary contract;
 - a high-consequence design choice cannot be distinguished reliably by focused
@@ -147,14 +149,14 @@ gate.
 
 Use `xhigh` only when all of these gates are evidenced:
 
-1. The Task requires a genuinely long reasoning horizon, such as many
+1. The work item requires a genuinely long reasoning horizon, such as many
    interdependent tool loops, large-context synthesis, or repeated hypothesis
    testing.
 2. A severe hazard remains, such as weakly observable concurrency/ordering,
    irreversible migration/cutover, independently deployed compatibility, or
    another high-consequence non-local invariant.
 3. Verification is weak or rollback is difficult, or representative evaluations
-   of this Task class show a material benefit over `high`.
+   of this work-item class show a material benefit over `high`.
 
 Otherwise cap the initial effort at `high`. Treat `sol-high` as a compounded
 case, not the default Sol profile, and treat every `xhigh` profile as
@@ -163,7 +165,7 @@ profile.
 
 ## Explain Every Recommendation
 
-For each Task:
+For each work item:
 
 1. Cite the scope and risk signals that drive the choice.
 2. Give one primary recommendation, not a menu.
@@ -172,13 +174,13 @@ For each Task:
 4. Give concrete escalation triggers that can be checked during implementation.
 5. Assign confidence as `high`, `medium`, or `low`, based on source completeness.
 
-Keep sequencing separate from profile selection. Different Tasks under one Story
-may use different profiles.
+Keep sequencing separate from profile selection. Different work items under one
+Story may use different profiles.
 
-After the readiness gate passes, return every planned Task exactly once in
+After the readiness gate passes, return every planned work item exactly once in
 execution order. Derive the order from authoritative blocker, prerequisite,
 replacement, and cross-repository relations. When no authority imposes an
-order, use the order in which the Tasks were read and label it
+order, use the order in which the work items were read and label it
 `no dependency; stable order`.
 
 ## Return the Report
@@ -186,7 +188,7 @@ order, use the order in which the Tasks were read and label it
 Use this structure:
 
 ```markdown
-# Task Execution Profile Report: <Story or ticket>
+# Work Item Execution Profile Report: <Story or ticket>
 
 ## Authority snapshot
 - Source, revision, state, and relations
@@ -195,11 +197,11 @@ Use this structure:
 
 ## Recommendations
 
-| Task | Scope summary | Execution profile | Why not lower | Confidence |
+| Work item | Scope summary | Execution profile | Why not lower | Confidence |
 |---|---|---|---|---|
 | AB#... | ... | terra-medium | ... | high |
 
-## Task analysis
+## Work-item analysis
 
 ### AB#... — <title>
 - Evidence and complexity signals:
@@ -214,11 +216,11 @@ Use this structure:
 2. AB#... — dependency or ordering reason
 
 ## Cost and sequencing summary
-- Tasks by execution profile:
+- Work items by execution profile:
 - Recommended execution order when authority defines one:
 - Conditions that require re-planning:
 
-This report is planning guidance only. Before implementing each Task, re-read
+This report is planning guidance only. Before implementing each work item, re-read
 its current revision, relations, repository state, and relevant code. If they
 conflict with this report, current authority and code win.
 ```

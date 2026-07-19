@@ -28,5 +28,5 @@ recommendation. It permits one retry only before a worker starts and only when
 the host explicitly reports that the requested reasoning effort or capacity is
 unavailable. The retry must use the listed profile, preserve the model, and be
 recorded with the planned profile, effective profile, and host error. A blank
-fallback stops the run. Never use it after a worker starts, for a Task failure,
+fallback stops the run. Never use it after a worker starts, for a work-item failure,
 or for a model-wide availability error.

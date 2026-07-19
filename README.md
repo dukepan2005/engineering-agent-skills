@@ -9,9 +9,9 @@ its own triggering and runtime instructions.
 | Skill | Purpose |
 |---|---|
 | [`azure-devops-boards-skill`](skills/azure-devops-boards-skill/) | Safely read and mutate Azure DevOps Boards work items through the locally authenticated Azure CLI. |
-| [`azure-task-implement`](skills/azure-task-implement/) | Wrap `$implement` with compact Azure Boards Task preflight and closeout. |
-| [`task-model-planner`](skills/task-model-planner/) | Recommend one named, lowest-reliable execution profile for each Task. |
-| [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver a Story's Azure Tasks in order, each in a named-profile subagent. |
+| [`azure-task-implement`](skills/azure-task-implement/) | Wrap `$implement` with compact Azure Boards work-item preflight and closeout. |
+| [`task-model-planner`](skills/task-model-planner/) | Recommend one named, lowest-reliable execution profile for each work item. |
+| [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver a Story's implementation-ready work items in order, each in a named-profile subagent. |
 
 ## Third-Party Dependency
 
@@ -28,7 +28,7 @@ npx skills@latest add mattpocock/skills
 ```
 
 The wrapper also requires this repository's `$azure-devops-boards-skill`. It
-checks every dependency before it begins a Task, stops and reports a missing
+checks every dependency before it begins a work item, stops and reports a missing
 dependency, and never installs one automatically.
 
 `$azure-devops-boards-skill` also requires a locally authenticated Azure CLI
@@ -78,8 +78,8 @@ and command examples.
 
 ### Azure Task delivery
 
-Invoke this wrapper to implement one Azure Boards Task without reproducing a
-project-specific tracker gate:
+Invoke this wrapper to implement one implementation-ready Azure Boards work item
+without reproducing a project-specific tracker gate:
 
 ```text
 $azure-task-implement AB#169
@@ -89,7 +89,8 @@ It runs one compact tracker preflight, then delegates implementation, testing,
 review, and commit to the complete `$implement` workflow before performing
 validated Markdown-safe closeout. Use `$azure-task-implement AB#169 --state
 Closed` only when the final state is explicitly known; otherwise the wrapper
-preserves the current state.
+preserves the current state. Eligibility is based on bounded implementation
+scope, not `System.WorkItemType`; do not convert a Bug into a Task to use it.
 
 #### Dependencies
 
@@ -97,7 +98,7 @@ This wrapper does not bundle or install third-party Skills. Before invoking it,
 install `$implement` from
 [`mattpocock/skills`](https://github.com/mattpocock/skills), and install this
 repository's `$azure-devops-boards-skill` for the same agent host. It checks
-both before reading or changing a Task and stops with the relevant install
+both before reading or changing a work item and stops with the relevant install
 command if one is unavailable. `$tdd` from `mattpocock/skills` is recommended,
 because `$implement` uses it where appropriate.
 
@@ -109,7 +110,7 @@ Invoke the Skill to plan a Story or a set of tickets:
 $task-model-planner AB#167
 ```
 
-It returns one cost-aware execution-profile ID per Task, plus evidence,
+It returns one cost-aware execution-profile ID per work item, plus evidence,
 confidence, and escalation triggers. The planner's bundled registry is the
 single mapping from profile ID to model and reasoning effort.
 
@@ -117,14 +118,14 @@ single mapping from profile ID to model and reasoning effort.
 
 ```text
 $task-model-planner <Story>
-$azure-task-implement <Task>
+$azure-task-implement <work-item>
 ```
 
 ### Profile-planned sequential delivery
 
-Use the orchestrator when every Task in a Story or explicit set should be
-planned first and then delivered sequentially by subagents with the recommended
-execution profile:
+Use the orchestrator when every implementation-ready work item in a Story or
+explicit set should be planned first and then delivered sequentially by
+subagents with the recommended execution profile:
 
 ```text
 $azure-task-orchestrator AB#168
@@ -135,8 +136,8 @@ then creates a named subagent with that exact model and reasoning effort. If
 the host rejects the requested effort before the worker starts, it may make one
 same-model, lower-effort retry from that registry and records both profiles.
 It validates and displays the planner's ordered report, then waits for explicit
-user confirmation before dispatching any Task. It stops the sequence on the
-first unsuccessful worker; it never substitutes the parent model or runs Tasks
+user confirmation before dispatching any work item. It stops the sequence on the
+first unsuccessful worker; it never substitutes the parent model or runs work items
 in parallel. It accepts a dependency Skill supplied natively by the host, as a
 complete `<skill>` block in the current context, or by an explicit readable
 `SKILL.md` path; it runs them directly as `/task-model-planner` and
