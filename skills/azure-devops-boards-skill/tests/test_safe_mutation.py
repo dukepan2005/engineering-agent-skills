@@ -35,6 +35,26 @@ class ValidationGuardsTheWriteTests(unittest.TestCase):
         self.assertIn("Validation failed for System.State", str(cm.exception))
         self.assertEqual(fake.applies, 0)
 
+    def test_iteration_mismatch_displays_requested_and_returned_paths(self):
+        class NormalizedIteration(FakeClient):
+            def validate(self, document, target):
+                item = super().validate(document, target)
+                item["fields"]["System.IterationPath"] = "GayDating\\Sprint_2026_S02"
+                return item
+
+        requested = "GayDating\\\\Sprint_2026_S02"
+        fake = NormalizedIteration.with_item(42)
+        with self.assertRaises(RuntimeError) as cm:
+            safe_mutate(client=fake, target=ExistingItem(42),
+                        document=[PatchOp("add", "/fields/System.IterationPath", requested)],
+                        expectation=Expectation(fields={"System.IterationPath": requested}), apply=True)
+        self.assertEqual(
+            str(cm.exception),
+            'Validation failed for System.IterationPath: requested "GayDating\\\\\\\\Sprint_2026_S02", '
+            'but Azure returned "GayDating\\\\Sprint_2026_S02".'
+        )
+        self.assertEqual(fake.applies, 0)
+
     def test_description_mismatch_at_validation_prevents_write(self):
         fake = FakeClient.with_item(42)
         with self.assertRaises(RuntimeError) as cm:

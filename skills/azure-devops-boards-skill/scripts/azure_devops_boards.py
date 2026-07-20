@@ -140,7 +140,7 @@ def _scope_summary(description):
 
 
 def preflight(args):
-    """Emit the smallest source-of-truth snapshot needed to begin one Task."""
+    """Emit the smallest source-of-truth snapshot needed to begin one work item."""
     item = connect(args)[0].read(args.id)
     fields = item.get("fields", {})
     emit({"id": item.get("id", args.id), "rev": item.get("rev"),
@@ -154,7 +154,14 @@ def _evaluate(item, expectation, phase):
     if expectation.description is not None: assert_description(item, expectation.description)
     fields = item.get("fields", {})
     for field, value in expectation.fields.items():
-        if fields.get(field) != value: raise RuntimeError(f"{phase} failed for {field}.")
+        actual = fields.get(field)
+        if actual != value:
+            requested = json.dumps(value, ensure_ascii=False)
+            returned = json.dumps(actual, ensure_ascii=False)
+            raise RuntimeError(
+                f"{phase} failed for {field}: requested {requested}, "
+                f"but Azure returned {returned}."
+            )
     if expectation.relation is not None:
         rel, url = expectation.relation
         if not _has_relation(item, rel, url): raise RuntimeError(f"{phase} failed for relation {rel}.")
@@ -221,7 +228,7 @@ def add_comment(args):
 
 
 def close_task(args):
-    """Persist one final Task patch and one Markdown completion comment.
+    """Persist one final work-item patch and one Markdown completion comment.
 
     The preflight revision avoids a redundant pre-write read. The patch's rev
     test still prevents a write when the work item has changed.
@@ -266,7 +273,7 @@ def parser():
     current = commands.add_parser("current-sprint"); connection(current, True); current.set_defaults(run=lambda a: print(sprint(a)))
     show = commands.add_parser("show"); connection(show); show.add_argument("--id", type=int, required=True); show.set_defaults(run=lambda a: emit(connect(a)[0].read(a.id)))
     preflight_p = commands.add_parser("implement-preflight"); connection(preflight_p); preflight_p.add_argument("--id", type=int, required=True); preflight_p.set_defaults(run=preflight)
-    create_p = commands.add_parser("create"); connection(create_p, True); create_p.add_argument("--apply", action="store_true"); create_p.add_argument("--type", choices=("User Story", "Task", "Bug"), required=True); create_p.add_argument("--title", required=True); create_p.add_argument("--description-file", type=Path, required=True); create_p.add_argument("--iteration"); create_p.add_argument("--tags", action="append", default=[])
+    create_p = commands.add_parser("create"); connection(create_p, True); create_p.add_argument("--apply", action="store_true"); create_p.add_argument("--type", choices=("Epic", "Feature", "User Story", "Task", "Bug"), required=True); create_p.add_argument("--title", required=True); create_p.add_argument("--description-file", type=Path, required=True); create_p.add_argument("--iteration"); create_p.add_argument("--tags", action="append", default=[])
     for kind in RELATIONS: create_p.add_argument(f"--{kind}", action="append", type=int, default=[])
     create_p.set_defaults(run=create)
     update_p = commands.add_parser("update"); connection(update_p); update_p.add_argument("--apply", action="store_true"); update_p.add_argument("--id", type=int, required=True); update_p.add_argument("--description-file", type=Path); update_p.add_argument("--state"); update_p.add_argument("--iteration"); update_p.set_defaults(run=update)

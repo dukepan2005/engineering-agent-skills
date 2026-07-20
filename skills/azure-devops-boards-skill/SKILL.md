@@ -1,6 +1,6 @@
 ---
 name: azure-devops-boards-skill
-description: Safely create, inspect, update, comment on, and link Azure DevOps Boards work items using the locally authenticated Azure CLI. Use when Codex or Claude Code needs to manage Azure Boards Stories, Tasks, Bugs, Markdown descriptions or comments, Sprint assignment, parent-child relations, blocking dependencies, or related links across any repository or Azure DevOps project. Also use when /to-spec, /to-tickets, /implement, or another workflow needs to publish or update work items in an Azure DevOps tracker.
+description: Safely create, inspect, update, comment on, and link Azure DevOps Boards work items using the locally authenticated Azure CLI. Use when Codex or Claude Code needs to manage Azure Boards Epics, Features, Stories, Tasks, Bugs, Markdown descriptions or comments, Sprint assignment, parent-child relations, blocking dependencies, or related links across any repository or Azure DevOps project. Also use when /to-spec, /to-tickets, /implement, or another workflow needs to publish or update Azure DevOps work items.
 allowed-tools: Bash(sh *)
 ---
 
@@ -71,11 +71,12 @@ Add `--apply` after validation. For `predecessor`, `--target-id` blocks the curr
 
 ## Keep implementation synchronization compact
 
-For one Task, run `implement-preflight` once before editing. It returns a compact
-snapshot of the revision, state, title, structured acceptance criteria (or the
-full Description when it cannot safely extract them), and relation IDs. Keep it
-as the scope authority for the current thread. Re-run only after a task, branch,
-or session change, or when a scope conflict appears.
+For one implementation-ready work item, run `implement-preflight` once before
+editing. It returns a compact snapshot of the revision, type, state, title,
+structured acceptance criteria (or the full Description when it cannot safely
+extract them), and relation IDs. Keep it as the scope authority for the current
+thread. Re-run only after an item, branch, or session change, or when a scope
+conflict appears.
 
 At closeout, run `close-task` once without `--apply`, then repeat it with
 `--apply`. Pass the preflight `rev` as `--expected-rev` to avoid an extra

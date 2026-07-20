@@ -1,0 +1,6 @@
+interface:
+  display_name: "Azure Task Orchestrator"
+  short_description: "Run profile-planned Azure work items sequentially"
+  default_prompt: "Use $azure-task-orchestrator to plan and deliver every implementation-ready work item under AB#168 sequentially."
+policy:
+  allow_implicit_invocation: false

@@ -1,6 +1,6 @@
 ---
 name: task-model-planner
-description: Analyze a Story, ticket, or implementation specification and produce a source-backed report recommending an implementation model and thinking level for each Task. Use when the user asks which model, reasoning effort, or cost-aware execution profile should implement a Story's child Tasks or a set of tickets.
+description: Analyze implementation-ready Azure work items produced after /grill-with-docs, /to-spec, and /to-tickets, then recommend one source-backed execution profile for each item. Use when the user asks which model profile, reasoning effort, or cost-aware execution configuration should implement a Story's child items or an explicit work-item set, including Tasks and Bugs.
 ---
 
 # Task Model Planner
@@ -11,12 +11,12 @@ tracker.
 ## Establish the Work Set
 
 1. Read the nearest `AGENTS.md` and every repository guidance file it requires.
-2. Read the current authoritative Story or ticket, including revision, state,
-   acceptance criteria, relations, comments, attachments, and linked
-   specification documents that affect scope.
-3. For a Story, analyze each directly related child Task separately. For a Task
-   or standalone ticket, analyze only that item unless the user explicitly names
-   a larger set.
+2. Read the current authoritative parent or target work item, including
+   revision, state, acceptance criteria, relations, comments, attachments, and
+   linked specification documents that affect scope.
+3. For a Story, analyze each directly related implementation-ready child work
+   item separately, regardless of whether Azure labels it Task or Bug. For an
+   explicit work-item set, analyze only the named items.
 4. Read blocking, prerequisite, replacement, or cross-repository tickets only
    when they materially affect a recommendation.
 5. Use the existing Azure Boards skill and repository tracker guidance for
@@ -29,25 +29,52 @@ Treat the current tracker, linked specifications, and current code as
 authoritative over earlier plans or summaries. State conflicts instead of
 silently resolving them.
 
+## Verify Planning Readiness
+
+Treat `/grill-with-docs`, `/to-spec`, and `/to-tickets` as the required
+upstream workflow. Before choosing any profile, verify that:
+
+- the accepted decisions are recorded in the authoritative Story description
+  or a linked implementation specification;
+- every work item traces to that planning authority and has bounded scope,
+  acceptance criteria, and focused verification requirements;
+- prerequisite, blocker, replacement, and cross-repository relations are
+  present when the specification requires them;
+- the specification, work items, current tracker state, and any inspected current
+  code do not materially conflict.
+
+If an artifact is missing or materially inconsistent, return an
+`Input not ready` report listing the affected work items and evidence, then stop
+without recommending profiles. Do not compensate for an incomplete planning
+workflow by selecting Sol or a higher reasoning effort.
+
 ## Keep the Analysis Read-Only
 
 - Do not edit code, documents, Git state, configuration, or tracker items.
 - Do not build, test, migrate, generate, install, commit, push, or invoke
   `$implement`.
-- Do not split, rewrite, create, or reprioritize Tasks.
+- Do not split, rewrite, create, reprioritize, or change the type of work items.
 - Record missing information and its effect on confidence.
 - Stop after returning the report.
 
-## Classify the Task
+## Classify the Work Item
 
 Choose the lowest-cost profile that has a credible path to meeting acceptance
 criteria and focused verification requirements. Do not assign a stronger model
-merely because a Task is large.
+merely because a work item is large or crosses a module, contract, lifecycle
+stage, or repository.
 
-For each Task, assess only source-backed evidence:
+Classify only residual implementation uncertainty that remains after the
+upstream design and decomposition workflow. Do not charge again for decisions,
+scope, coupling, or ordering already resolved by the specification and
+work-item graph.
 
-- Ambiguity: are acceptance criteria, ownership, and expected behavior clear?
-- Coupling: how many modules, repositories, contracts, or lifecycle stages change?
+For each ready work item, assess only source-backed evidence:
+
+- Residual judgment: must the implementer still choose product semantics,
+  ownership, architecture, lifecycle behavior, or a boundary contract?
+- Coordination: do independently verifiable changes follow an established
+  contract, or must one invariant remain correct across boundaries?
 - Failure cost: could a wrong change cause data loss, security exposure,
   compatibility breakage, or difficult rollback?
 - Reasoning hazards: concurrency, ordering, migrations, deletion/cutover,
@@ -55,42 +82,113 @@ For each Task, assess only source-backed evidence:
 - Verification strength: do focused tests, types, migrations, or established
   patterns independently detect a wrong implementation?
 
-## Choose the Implementation Profile
+## Choose the Execution Profile
 
-Choose only between `gpt-5.6-terra` and `gpt-5.6-sol`:
+Read [the canonical execution-profile registry](references/execution-profiles.md)
+before selecting a profile. Output only its profile ID; do not output a free-form
+model and thinking-level pair.
 
-- Choose `gpt-5.6-terra` when scope is bounded and current authority plus
-  focused verification make incorrect assumptions cheap to detect.
-- Choose `gpt-5.6-sol` when unresolved ambiguity, cross-boundary coupling, or
-  failure cost requires stronger judgment before implementation.
+Choose the model family and reasoning effort independently. Use these four
+profiles for regular planning:
 
-Use `medium` by default for a clear, bounded Task with a credible focused
-verification plan. Use `high` only for multiple coordinated changes or one
-material reasoning hazard. Use `xhigh` only when high failure cost combines with
-concrete uncertainty, concurrency/ordering, migration/compatibility, or
-cross-repository risk. Never recommend `max` initially; name it only as an
-escalation after a fresh authority/code read and an unsuccessful lower-effort
-attempt leave a specific issue unresolved.
+- `terra-medium`: decisions are resolved and execution is straightforward or
+  mechanical;
+- `terra-high`: decisions are resolved but implementation retains a material
+  reasoning hazard or several interdependent changes;
+- `sol-medium`: material residual judgment remains, but the decision is bounded
+  and no deep implementation hazard is present;
+- `sol-high`: residual judgment and deep implementation reasoning are both
+  required.
+
+Treat `terra-high` and `sol-medium` as the two primary profiles for agent-ready
+work items. Use `terra-medium` for genuinely straightforward work and
+`sol-high` for the compounded case.
+
+Use this regular escalation order:
+
+`terra-medium` → `terra-high` → `sol-medium` → `sol-high`
+
+Therefore `sol-medium` is the immediate next regular profile after
+`terra-high`. Do not use an `xhigh` profile as part of this regular ladder.
+
+### Choose Terra or Sol
+
+Choose Terra when the specification has already fixed the intended behavior,
+ownership, contracts, and rollout semantics, and focused verification makes an
+incorrect implementation cheap to detect. This remains true when mechanical or
+independently verifiable edits span multiple modules or repositories.
+
+Choose Sol only when source-backed residual judgment remains, such as:
+
+- the specification, work item, current code, or another current authority
+  conflicts;
+- the work item explicitly delegates a material product, domain, or architectural
+  decision to the implementer;
+- the implementation must invent or renegotiate a boundary contract;
+- a high-consequence design choice cannot be distinguished reliably by focused
+  verification;
+- ownership, lifecycle, security, migration, or compatibility semantics remain
+  unresolved.
+
+Treat cross-boundary scope as a prompt to inspect the seam, never as a Sol
+trigger by itself.
+
+### Choose Reasoning Effort
+
+Use `medium` when the reasoning path is bounded, feedback is strong, and no
+material non-local invariant must remain correct across many steps. Select
+`terra-medium` only for mechanical or straightforward execution after the
+specification has resolved all material decisions.
+
+Use `high` when one material reasoning hazard or several interdependent
+implementation decisions remain, including concurrency, ordering, lifecycle,
+retry/idempotency, a coordinated migration or compatibility transition,
+non-local invariants, or repeated hypothesis-and-test loops. Select `sol-high`
+only when this deeper implementation reasoning combines with a Sol judgment
+gate.
+
+Use `xhigh` only when all of these gates are evidenced:
+
+1. The work item requires a genuinely long reasoning horizon, such as many
+   interdependent tool loops, large-context synthesis, or repeated hypothesis
+   testing.
+2. A severe hazard remains, such as weakly observable concurrency/ordering,
+   irreversible migration/cutover, independently deployed compatibility, or
+   another high-consequence non-local invariant.
+3. Verification is weak or rollback is difficult, or representative evaluations
+   of this work-item class show a material benefit over `high`.
+
+Otherwise cap the initial effort at `high`. Treat `sol-high` as a compounded
+case, not the default Sol profile, and treat every `xhigh` profile as
+exceptional. Do not invent profiles, and do not recommend `max` as an initial
+profile.
 
 ## Explain Every Recommendation
 
-For each Task:
+For each work item:
 
 1. Cite the scope and risk signals that drive the choice.
 2. Give one primary recommendation, not a menu.
-3. Explain why a lower-cost model or lower reasoning level is insufficient.
+3. Name the exact gate that disqualifies the next lower-cost profile. If no gate
+   is evidenced, choose the lower profile.
 4. Give concrete escalation triggers that can be checked during implementation.
 5. Assign confidence as `high`, `medium`, or `low`, based on source completeness.
 
-Keep sequencing separate from model selection. Different Tasks under one Story
-may use different profiles.
+Keep sequencing separate from profile selection. Different work items under one
+Story may use different profiles.
+
+After the readiness gate passes, return every planned work item exactly once in
+execution order. Derive the order from authoritative blocker, prerequisite,
+replacement, and cross-repository relations. When no authority imposes an
+order, use the order in which the work items were read and label it
+`no dependency; stable order`.
 
 ## Return the Report
 
 Use this structure:
 
 ```markdown
-# Task Implementation Model Report: <Story or ticket>
+# Work Item Execution Profile Report: <Story or ticket>
 
 ## Authority snapshot
 - Source, revision, state, and relations
@@ -99,26 +197,30 @@ Use this structure:
 
 ## Recommendations
 
-| Task | Scope summary | Model | Thinking level | Why not lower | Confidence |
-|---|---|---|---|---|---|
-| AB#... | ... | gpt-5.6-terra | medium | ... | high |
+| Work item | Scope summary | Execution profile | Why not lower | Confidence |
+|---|---|---|---|---|
+| AB#... | ... | terra-medium | ... | high |
 
-## Task analysis
+## Work-item analysis
 
 ### AB#... — <title>
 - Evidence and complexity signals:
-- Model and thinking level:
+- Execution profile:
 - Why this is the lowest-cost reliable profile:
 - Escalation triggers:
 - Unknowns:
 
+## Execution plan
+
+1. AB#... — dependency or ordering reason
+2. AB#... — dependency or ordering reason
+
 ## Cost and sequencing summary
-- Tasks suitable for Terra:
-- Tasks requiring Sol:
+- Work items by execution profile:
 - Recommended execution order when authority defines one:
 - Conditions that require re-planning:
 
-This report is planning guidance only. Before implementing each Task, re-read
+This report is planning guidance only. Before implementing each work item, re-read
 its current revision, relations, repository state, and relevant code. If they
 conflict with this report, current authority and code win.
 ```
