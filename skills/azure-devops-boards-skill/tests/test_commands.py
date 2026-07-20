@@ -17,7 +17,7 @@ sys.path.insert(0, str(HERE))                     # tests/   → fakes
 sys.path.insert(0, str(HERE.parent / "scripts"))  # scripts/ → azure_devops_boards
 
 from fakes import FakeClient, PatchOp  # noqa: E402
-from azure_devops_boards import RELATIONS, add_comment, add_link, close_task, create, preflight, update  # noqa: E402
+from azure_devops_boards import RELATIONS, add_comment, add_link, close_task, create, parser, preflight, update  # noqa: E402
 
 ORG, PROJECT = "https://dev.azure.com/o", "P"
 
@@ -35,6 +35,14 @@ def _run(func, fake, args):
 
 
 class CreateCommandTests(unittest.TestCase):
+    def test_parser_accepts_epic_and_feature(self):
+        for item_type in ("Epic", "Feature"):
+            args = parser().parse_args([
+                "create", "--organization", ORG, "--project", PROJECT, "--team", "Team",
+                "--type", item_type, "--title", "T", "--description-file", "/tmp/item.md",
+            ])
+            self.assertEqual(args.type, item_type)
+
     def _args(self, apply, text="body", iteration="Sprint 1"):
         return SimpleNamespace(organization=ORG, project=PROJECT, apply=apply, type="Task",
                                title="T", iteration=iteration, description_file=_file(text),

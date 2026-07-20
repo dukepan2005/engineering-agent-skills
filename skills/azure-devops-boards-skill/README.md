@@ -5,7 +5,7 @@ An [Agent Skills](https://agentskills.io/) package for safely managing Azure Dev
 It provides a shared, project-neutral implementation for:
 
 - Reading work items and the current team Sprint
-- Creating User Stories, Tasks, and Bugs
+- Creating Epics, Features, User Stories, Tasks, and Bugs
 - Updating descriptions, workflow states, and iterations
 - Posting comments with explicit Markdown format
 - Creating native parent, predecessor, and related links
