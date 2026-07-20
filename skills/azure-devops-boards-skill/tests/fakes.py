@@ -3,8 +3,8 @@
 ``FakeClient`` is an in-memory adapter implementing the runner's validate/apply/read
 port. It models the Azure behaviours the safety checks depend on:
 
-- ``validateOnly=true`` projects the would-be item, echoing back the relations sent
-  in the request (per the Work Items Create/Update REST docs);
+- ``validateOnly=true`` projects the would-be item. Tests can model Azure update
+  responses that omit relation projections;
 - ``System.Description`` is HTML-escaped (``&``, ``<``, ``>``) on output — the
   regression in commit b9232a0;
 - ``/rev`` is honoured for optimistic concurrency.

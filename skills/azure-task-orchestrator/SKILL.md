@@ -1,6 +1,6 @@
 ---
 name: azure-task-orchestrator
-description: Plan and deliver implementation-ready Azure DevOps Boards work items under a Story or in an explicit item set, in dependency order. Use when the user wants `$task-model-planner` to choose a named execution profile for each item, then wants each item delivered by `$azure-task-implement` in a sequential subagent with that exact profile.
+description: Plan and deliver implementation-ready Azure DevOps Boards work items under a Story or in an explicit item set, in dependency order. Use when the user wants the task-model-planner skill to choose a named execution profile for each item, then wants each item delivered by the azure-task-implement skill in a sequential subagent with that exact profile.
 ---
 
 # Azure Task Orchestrator
@@ -11,9 +11,9 @@ Do not implement, review, or close work items in the orchestrator itself.
 
 ## Require Direct Skills Before Work
 
-Before reading tracker data or spawning a worker, use
-`/task-model-planner` and `/azure-task-implement`, plus a subagent spawn
-primitive that accepts an explicit model and reasoning effort.
+Before reading tracker data or spawning a worker, use the `task-model-planner`
+and `azure-task-implement` skills, plus a subagent spawn primitive that accepts
+an explicit model and reasoning effort.
 
 For each Skill, accept one of these ways to obtain its instructions:
 
@@ -22,11 +22,11 @@ For each Skill, accept one of these ways to obtain its instructions:
 - **Path:** the current conversation or host catalog supplies an absolute,
   readable `SKILL.md` path. Read that file completely before using it.
 
-When a Skill is supplied by Context or Path, follow its instructions directly
-as `/task-model-planner` or `/azure-task-implement` without adding a
-host-specific invocation tool. Record how each Skill was supplied. Do not infer
-a path from a Skill name or treat an installed directory that is neither
-advertised nor supplied as available.
+When a Skill is supplied by Context or Path, follow the `task-model-planner` or
+`azure-task-implement` skill instructions directly without adding a host-specific
+invocation tool. Record how each Skill was supplied. Do not infer a path from a
+Skill name or treat an installed directory that is neither advertised nor
+supplied as available.
 
 On Codex, use `spawn_agent` with `model` and `reasoning_effort`. On another
 host, use its equivalent only when it can set both values for each child. Stop
@@ -36,11 +36,11 @@ run the work item in the parent agent or fall back to the parent's profile.
 
 ## Build and Validate the Plan
 
-1. Run `/task-model-planner` for the Story or explicit work-item set. When it is
-   supplied by Context or Path, first read its complete supplied body or
-   `SKILL.md`, then follow it directly. Treat its report as read-only planning
+1. Use the `task-model-planner` skill for the Story or explicit work-item set.
+   When it is supplied by Context or Path, first read its complete supplied body
+   or `SKILL.md`, then follow it directly. Treat its report as read-only planning
    guidance, not tracker authority.
-2. Read `$task-model-planner`'s canonical
+2. Read the `task-model-planner` skill's canonical
    `references/execution-profiles.md` registry. Resolve every profile ID from
    that one registry; do not reproduce or override its mapping here.
 3. Do not omit or reject a target solely because its Azure type is not Task,
@@ -96,11 +96,11 @@ For each work item in the validated execution plan:
    models, or for a work-item-level failure.
 3. Give the worker only its work-item ID and type, planned profile ID, effective
    profile ID, relevant planner evidence and order reason, the resolved
-   `$azure-task-implement` source, plus this instruction:
+   `azure-task-implement` skill source, plus this instruction:
 
    ```text
-   Run /azure-task-implement to deliver exactly <work-item ID> in the current
-   workspace and branch. When it is supplied by Context or Path, read its
+   Use the `azure-task-implement` skill to deliver exactly <work-item ID> in the
+   current workspace and branch. When it is supplied by Context or Path, read its
    complete supplied body or resolved SKILL.md before acting. Re-read current
    tracker and repository authority; the planner is not a substitute for
    preflight. Do not implement another work item. Do not reject or convert this
@@ -109,7 +109,7 @@ For each work item in the validated execution plan:
    the compact delivery summary.
    ```
 
-4. Let `$azure-task-implement` own that work item's preflight, implementation,
+4. Let the `azure-task-implement` skill own that work item's preflight, implementation,
    verification, review, commit, and Azure closeout. Do not duplicate any of
    those operations in the parent.
 5. Require the worker to finish before inspecting its result. Keep the shared
@@ -121,7 +121,7 @@ For each work item in the validated execution plan:
    pre-start capacity rule, or re-plan silently.
 
 Run only one delivery worker at a time even when work items look independent.
-This preserves the clean-worktree requirement of `$azure-task-implement`,
+This preserves the clean-worktree requirement of the `azure-task-implement` skill,
 preserves the planned dependency order, and makes each work item's commit and
 tracker closeout auditable.
 

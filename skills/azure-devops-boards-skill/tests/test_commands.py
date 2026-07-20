@@ -120,6 +120,13 @@ class AddLinkCommandTests(unittest.TestCase):
         self.assertEqual(out, {"mode": "validated", "id": self.ID, "kind": self.KIND, "targetId": self.TARGET})
         self.assertEqual(fake.applies, 0)
 
+    def test_applied_mode_reads_back_relation_when_validation_omits_it(self):
+        fake = FakeClient.with_item(self.ID, rev=3, echo_relations_on_validate=False)
+        out = _run(add_link, fake, self._args(apply=True))
+        self.assertEqual(out, {"mode": "applied", "id": self.ID, "kind": self.KIND, "targetId": self.TARGET})
+        self.assertEqual(fake.applies, 1)
+        self.assertTrue(any(r["url"] == self._relation_value()["url"] for r in fake.read(self.ID)["relations"]))
+
     def test_applied_mode_writes_and_emits(self):
         fake = self._seeded()
         out = _run(add_link, fake, self._args(apply=True))

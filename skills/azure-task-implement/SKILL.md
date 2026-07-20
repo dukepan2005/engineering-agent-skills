@@ -1,13 +1,13 @@
 ---
 name: azure-task-implement
-description: "Deliver one implementation-ready Azure DevOps Boards work item through a compact lifecycle: preflight its current scope, run the complete third-party $implement workflow, then validate and persist a Markdown-safe closeout. Use when the user asks to implement, deliver, finish, or close a specific Azure Boards item such as a Task or Bug and wants Azure tracking synchronized without project-specific workflow gates."
+description: "Deliver one implementation-ready Azure DevOps Boards work item through a compact lifecycle: preflight its current scope, use the complete third-party implement skill workflow, then validate and persist a Markdown-safe closeout. Use when the user asks to implement, deliver, finish, or close a specific Azure Boards item such as a Task or Bug and wants Azure tracking synchronized without project-specific workflow gates."
 ---
 
 # Azure Task Implement
 
-Wrap the host-provided `$implement` workflow for exactly one implementation-ready
-Azure Boards work item.
-Use `$azure-devops-boards-skill` for all tracker operations. Keep repository
+Wrap the host-provided `implement` skill workflow for exactly one
+implementation-ready Azure Boards work item. Use the
+`azure-devops-boards-skill` skill for all tracker operations. Keep repository
 guidance authoritative for code, tests, state names, and checklist policy; this
 Skill provides the reusable lifecycle, not a replacement project process.
 
@@ -27,8 +27,8 @@ Skill provides the reusable lifecycle, not a replacement project process.
 Before reading a work item, confirm that the current host can invoke all of these
 Skills:
 
-- `$implement` from `mattpocock/skills`
-- `$azure-devops-boards-skill` from this repository
+- the `implement` skill from `mattpocock/skills`
+- the `azure-devops-boards-skill` skill from this repository
 
 If any is unavailable, stop without inspecting or changing the tracker, code,
 or Git state. State the missing Skill and print only the relevant install
@@ -46,7 +46,7 @@ missing dependency during a delivery run.
 ## Start Once
 
 1. Read repository guidance and resolve the Azure Boards helper through
-   `$azure-devops-boards-skill`.
+   `azure-devops-boards-skill` skill.
 2. Run `implement-preflight --id <work-item-number>` once. Keep its compact snapshot
    (revision, scope, and relation IDs) as the tracker authority for this thread.
 3. Stop if the item state, replacement relation, or blocker makes implementation
@@ -60,7 +60,7 @@ revision.
 
 ## Implement One Work Item
 
-- Invoke the complete `$implement` workflow with the current work-item scope and
+- Use the complete `implement` skill workflow with the current work-item scope and
   acceptance criteria from preflight. Let it use TDD where appropriate, run
   its verification, review the work, and create the one work-item commit in its
   defined order. Do not replace or duplicate its review or commit steps.
