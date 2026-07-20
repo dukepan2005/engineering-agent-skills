@@ -150,7 +150,7 @@ def preflight(args):
           "relations": _relation_summary(item)})
 
 
-def _evaluate(item, expectation, phase):
+def _evaluate(item, expectation, phase, *, check_relation=True):
     if expectation.description is not None: assert_description(item, expectation.description)
     fields = item.get("fields", {})
     for field, value in expectation.fields.items():
@@ -162,7 +162,7 @@ def _evaluate(item, expectation, phase):
                 f"{phase} failed for {field}: requested {requested}, "
                 f"but Azure returned {returned}."
             )
-    if expectation.relation is not None:
+    if check_relation and expectation.relation is not None:
         rel, url = expectation.relation
         if not _has_relation(item, rel, url): raise RuntimeError(f"{phase} failed for relation {rel}.")
 
@@ -170,11 +170,15 @@ def _evaluate(item, expectation, phase):
 def safe_mutate(*, client, target, document, expectation, apply):
     """The safe-mutation lifecycle: validate-only → check → apply → read-back → check.
 
-    Returns ``{mode, id?, rev?}``; never prints. The expectation is evaluated against
-    the validated item on every call, and against the read-back item when applying.
+    Returns ``{mode, id?, rev?}``; never prints. Fields and descriptions are checked
+    against the validated item. Existing-item relations are checked against
+    persisted read-back because Azure update validation can omit them.
     """
     checked = client.validate(document, target)
-    _evaluate(checked, expectation, "Validation")
+    # Azure update validateOnly responses can omit relations even when the JSON
+    # Patch is accepted. Relation presence is therefore a persisted-state check.
+    _evaluate(checked, expectation, "Validation",
+              check_relation=not isinstance(target, ExistingItem))
     if not apply: return {"mode": "validated"}
     new_id = client.apply(document, target)
     saved = client.read(new_id)

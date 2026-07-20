@@ -65,11 +65,18 @@ class ValidationGuardsTheWriteTests(unittest.TestCase):
         self.assertIn("Description or Markdown metadata did not persist.", str(cm.exception))
         self.assertEqual(fake.applies, 0)
 
-    def test_relation_not_projected_at_validation_prevents_write(self):
-        # The add_link tightening: the relation is now checked at validation too.
+    def test_relation_not_projected_at_validation_is_accepted(self):
         fake = FakeClient.with_item(42, echo_relations_on_validate=False)
+        result = safe_mutate(client=fake, target=ExistingItem(42),
+                             document=[PatchOp("add", "/relations/-", {"rel": "X", "url": "u"})],
+                             expectation=Expectation(relation=("X", "u")), apply=False)
+        self.assertEqual(result, {"mode": "validated"})
+        self.assertEqual(fake.applies, 0)
+
+    def test_create_relation_not_projected_at_validation_prevents_write(self):
+        fake = FakeClient(echo_relations_on_validate=False)
         with self.assertRaises(RuntimeError) as cm:
-            safe_mutate(client=fake, target=ExistingItem(42),
+            safe_mutate(client=fake, target=NewItem("Task"),
                         document=[PatchOp("add", "/relations/-", {"rel": "X", "url": "u"})],
                         expectation=Expectation(relation=("X", "u")), apply=True)
         self.assertIn("Validation failed for relation", str(cm.exception))

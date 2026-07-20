@@ -1,6 +1,6 @@
 ---
 name: task-model-planner
-description: Analyze implementation-ready Azure work items produced after /grill-with-docs, /to-spec, and /to-tickets, then recommend one source-backed execution profile for each item. Use when the user asks which model profile, reasoning effort, or cost-aware execution configuration should implement a Story's child items or an explicit work-item set, including Tasks and Bugs.
+description: Analyze implementation-ready Azure work items produced after the grill-with-docs, to-spec, and to-tickets skills, then recommend one source-backed execution profile for each item. Use when the user asks which model profile, reasoning effort, or cost-aware execution configuration should implement a Story's child items or an explicit work-item set, including Tasks and Bugs.
 ---
 
 # Task Model Planner
@@ -31,7 +31,7 @@ silently resolving them.
 
 ## Verify Planning Readiness
 
-Treat `/grill-with-docs`, `/to-spec`, and `/to-tickets` as the required
+Treat the `grill-with-docs`, `to-spec`, and `to-tickets` skills as the required
 upstream workflow. Before choosing any profile, verify that:
 
 - the accepted decisions are recorded in the authoritative Story description
@@ -51,8 +51,8 @@ workflow by selecting Sol or a higher reasoning effort.
 ## Keep the Analysis Read-Only
 
 - Do not edit code, documents, Git state, configuration, or tracker items.
-- Do not build, test, migrate, generate, install, commit, push, or invoke
-  `$implement`.
+- Do not build, test, migrate, generate, install, commit, push, or use the
+  `implement` skill.
 - Do not split, rewrite, create, reprioritize, or change the type of work items.
 - Record missing information and its effect on confidence.
 - Stop after returning the report.
