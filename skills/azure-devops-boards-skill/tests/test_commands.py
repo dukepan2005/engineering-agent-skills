@@ -127,6 +127,28 @@ class AddLinkCommandTests(unittest.TestCase):
         self.assertEqual(fake.applies, 1)
         self.assertTrue(any(r["url"] == self._relation_value()["url"] for r in fake.read(self.ID)["relations"]))
 
+    def test_applied_mode_accepts_project_guid_in_read_back_relation_url(self):
+        class ProjectGuidRead(FakeClient):
+            def read(self, item_id):
+                item = super().read(item_id)
+                for stored in item["relations"]:
+                    stored["url"] = stored["url"].replace(f"/{PROJECT}/", "/project-guid/")
+                return item
+
+        fake = ProjectGuidRead.with_item(self.ID, rev=3)
+        out = _run(add_link, fake, self._args(apply=True))
+        self.assertEqual(out, {"mode": "applied", "id": self.ID, "kind": self.KIND, "targetId": self.TARGET})
+        self.assertEqual(fake.applies, 1)
+
+    def test_existing_project_guid_relation_is_unchanged(self):
+        fake = self._seeded()
+        stored = self._relation_value()
+        stored["url"] = stored["url"].replace(f"/{PROJECT}/", "/project-guid/")
+        fake.items[self.ID]["relations"] = [stored]
+        out = _run(add_link, fake, self._args(apply=True))
+        self.assertEqual(out, {"mode": "unchanged", "id": self.ID})
+        self.assertEqual(fake.applies, 0)
+
     def test_applied_mode_writes_and_emits(self):
         fake = self._seeded()
         out = _run(add_link, fake, self._args(apply=True))

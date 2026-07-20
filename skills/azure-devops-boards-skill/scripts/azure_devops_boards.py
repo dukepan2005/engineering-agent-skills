@@ -107,8 +107,21 @@ def assert_description(item, text):
     if html.unescape(stored) != text or item.get("multilineFieldsFormat", {}).get("System.Description") != "markdown": raise RuntimeError("Description or Markdown metadata did not persist.")
 
 
+def _relation_work_item_id(url):
+    """Return the stable work-item ID from an Azure relation URL, if present."""
+    target = url.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+    return int(target) if target.isdigit() else None
+
+
 def _has_relation(item, rel, url):
-    return any(r.get("rel") == rel and r.get("url") == url for r in item.get("relations", []))
+    expected_id = _relation_work_item_id(url)
+    return any(
+        stored.get("rel") == rel and (
+            stored.get("url") == url if expected_id is None
+            else _relation_work_item_id(stored.get("url", "")) == expected_id
+        )
+        for stored in item.get("relations", [])
+    )
 
 
 def _relation_summary(item):
