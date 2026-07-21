@@ -53,8 +53,8 @@ Read the repository's tracker instructions before operating. Treat its work-item
 
 ```bash
 sh "$HELPER" current-sprint
-sh "$HELPER" show --id 61
-sh "$HELPER" show --id 61 --quiet     # id/rev/state/title/relations only
+sh "$HELPER" show --id 61               # compact default (id/rev/type/state/title/relations)
+sh "$HELPER" show --id 61 --full        # raw Azure JSON
 sh "$HELPER" implement-preflight --id 61
 
 sh "$HELPER" create \

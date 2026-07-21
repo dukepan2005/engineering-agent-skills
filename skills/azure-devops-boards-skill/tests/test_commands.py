@@ -296,21 +296,21 @@ class CloseTaskCheckAcTests(unittest.TestCase):
                                  "--comment-file", "/tmp/c.md"])
 
 
-class ShowQuietTests(unittest.TestCase):
-    def test_show_default_emits_full_item(self):
+class ShowFullTests(unittest.TestCase):
+    def test_show_default_emits_compact_summary(self):
         fake = FakeClient.with_item(42, rev=3)
         fake.items[42]["fields"].update({"System.Title": "T", "System.State": "Active"})
-        out = _run_with_func(show_item, fake, SimpleNamespace(organization=ORG, project=PROJECT, id=42, quiet=False))
+        out = _run_with_func(show_item, fake, SimpleNamespace(organization=ORG, project=PROJECT, id=42, full=False))
+        self.assertEqual(out, {"id": 42, "rev": 3, "type": "Task", "state": "Active", "title": "T", "relations": []})
+        self.assertNotIn("fields", out)
+
+    def test_show_full_emits_full_item(self):
+        fake = FakeClient.with_item(42, rev=3)
+        fake.items[42]["fields"].update({"System.Title": "T", "System.State": "Active"})
+        out = _run_with_func(show_item, fake, SimpleNamespace(organization=ORG, project=PROJECT, id=42, full=True))
         self.assertEqual(out["id"], 42)
         self.assertEqual(out["rev"], 3)
         self.assertIn("fields", out)
-
-    def test_show_quiet_emits_compact_summary(self):
-        fake = FakeClient.with_item(42, rev=3)
-        fake.items[42]["fields"].update({"System.Title": "T", "System.State": "Active"})
-        out = _run_with_func(show_item, fake, SimpleNamespace(organization=ORG, project=PROJECT, id=42, quiet=True))
-        self.assertEqual(out, {"id": 42, "rev": 3, "type": "Task", "state": "Active", "title": "T", "relations": []})
-        self.assertNotIn("fields", out)
 
 
 def _run_with_func(func, fake, args):

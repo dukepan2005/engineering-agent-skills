@@ -164,9 +164,10 @@ def preflight(args):
 
 
 def show_item(args):
-    """Emit a work item. ``--quiet`` returns id/rev/state/title/relations only."""
+    """Emit a work item. Default is compact (id/rev/type/state/title/relations);
+    pass ``--full`` for the raw Azure JSON."""
     item = connect(args)[0].read(args.id)
-    if not args.quiet: return emit(item)
+    if args.full: return emit(item)
     fields = item.get("fields", {})
     emit({"id": item.get("id", args.id), "rev": item.get("rev"),
           "type": fields.get("System.WorkItemType"), "state": fields.get("System.State"),
@@ -384,7 +385,7 @@ def connection(parser, team=False):
 def parser():
     root = argparse.ArgumentParser(description=__doc__); commands = root.add_subparsers(required=True)
     current = commands.add_parser("current-sprint"); connection(current, True); current.set_defaults(run=lambda a: print(sprint(a)))
-    show = commands.add_parser("show"); connection(show); show.add_argument("--id", type=int, required=True); show.add_argument("--quiet", action="store_true"); show.set_defaults(run=show_item)
+    show = commands.add_parser("show"); connection(show); show.add_argument("--id", type=int, required=True); show.add_argument("--full", action="store_true", help="emit the full Azure JSON"); show.set_defaults(run=show_item)
     preflight_p = commands.add_parser("implement-preflight"); connection(preflight_p); preflight_p.add_argument("--id", type=int, required=True); preflight_p.set_defaults(run=preflight)
     create_p = commands.add_parser("create"); connection(create_p, True); create_p.add_argument("--apply", action="store_true"); create_p.add_argument("--type", choices=("Epic", "Feature", "User Story", "Task", "Bug"), required=True); create_p.add_argument("--title", required=True); create_p.add_argument("--description-file", type=Path, required=True); create_p.add_argument("--iteration"); create_p.add_argument("--tags", action="append", default=[])
     for kind in RELATIONS: create_p.add_argument(f"--{kind}", action="append", type=int, default=[])
