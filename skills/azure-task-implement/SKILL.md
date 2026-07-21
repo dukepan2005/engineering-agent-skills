@@ -22,6 +22,24 @@ Skill provides the reusable lifecycle, not a replacement project process.
   deliverable child items. Report that scope problem without changing its type.
 - Let repository tracker guidance impose any stricter type or hierarchy rule.
 
+## Take the trivial fast-path when the change is small
+
+This Skill's full lifecycle (preflight → implement → `close-task`) is built for a
+code Task that carries an acceptance-criteria checklist. Not every item needs it.
+Before starting, self-assess the scope:
+
+- **Trivial change** — documentation, a one-to-two-file edit with no logic change,
+  or a fix whose correctness is obvious by inspection — takes the fast-path:
+  edit, commit, then a single `update` (state only, if needed) plus one
+  `add-comment` with the completion summary. Skip `implement-preflight` and
+  `close-task`; do not toggle checklist items that were never the authority for
+  the work.
+- **Anything else** — logic changes, multi-file behaviour, an item whose
+  acceptance criteria are the source of truth — runs the full lifecycle below.
+
+When in doubt, take the full lifecycle. The fast-path exists to avoid tracker
+bookkeeping that outweighs a +N-line change, not to skip verification.
+
 ## Require Dependencies Before Work
 
 Before reading a work item, confirm that the current host can invoke all of these
@@ -77,18 +95,24 @@ revision.
 2. If repository policy requires supported Markdown checklist changes, read the
    current Description once, update only evidence-backed items, and prepare a
    complete replacement Description. Otherwise do not read or rewrite it.
-3. Prepare one concise Markdown comment with `## Completion`, `## Verification`,
-   and `## Remaining work`.
+3. Prepare one concise Markdown comment from the
+   [closeout-comment template](references/closeout-comment.md)
+   (`## Completion`, `## Verification`, `## Remaining work`).
 4. Determine the final state only from explicit user input or repository
    guidance. If neither specifies one, leave state unchanged; do not assume
    `Closed` is universally valid.
-5. Run the helper's historically named `close-task` command without `--apply`,
-   then repeat the identical command with `--apply`, passing the preflight
-   revision as `--expected-rev`. Include a Description file and state only when
-   required.
+5. Run the helper's historically named `close-task` command once with `--apply`,
+   passing the preflight revision as `--expected-rev`. The helper validates,
+   applies, and read-back-checks in one call; a forward-moving rev (e.g. a commit
+   auto-link) auto-reconciles once. Toggle acceptance criteria with
+   `--check-ac all|FRAGMENT` instead of rewriting the whole Description, and
+   include a state only when required. For a high-risk closeout, the opt-in
+   two-phase dry-run (run without `--apply`, review, then with `--apply`) is
+   still available.
 6. Accept completion only after the helper verifies the final work-item mutation
-   and Markdown comment. If optimistic concurrency rejects the revision, rerun
-   preflight, reconcile the changed scope, and revalidate closeout.
+   and Markdown comment. If an irreconcilable optimistic-concurrency conflict
+   remains after the helper's one retry, rerun preflight, reconcile the changed
+   scope, and revalidate closeout.
 
 The helper may perform a work-item patch and a comment write. Treat their
 separate persisted checks as required; never describe them as one atomic Azure

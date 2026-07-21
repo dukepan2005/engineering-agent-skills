@@ -163,6 +163,16 @@ def preflight(args):
           "relations": _relation_summary(item)})
 
 
+def show_item(args):
+    """Emit a work item. ``--quiet`` returns id/rev/state/title/relations only."""
+    item = connect(args)[0].read(args.id)
+    if not args.quiet: return emit(item)
+    fields = item.get("fields", {})
+    emit({"id": item.get("id", args.id), "rev": item.get("rev"),
+          "type": fields.get("System.WorkItemType"), "state": fields.get("System.State"),
+          "title": fields.get("System.Title"), "relations": _relation_summary(item)})
+
+
 def _evaluate(item, expectation, phase, *, check_relation=True):
     if expectation.description is not None: assert_description(item, expectation.description)
     fields = item.get("fields", {})
@@ -180,23 +190,68 @@ def _evaluate(item, expectation, phase, *, check_relation=True):
         if not _has_relation(item, rel, url): raise RuntimeError(f"{phase} failed for relation {rel}.")
 
 
+def _rev_test(document):
+    """The ``/rev`` optimistic-concurrency test op, if the document carries one."""
+    for operation in document:
+        if getattr(operation, "op", None) == "test" and getattr(operation, "path", None) == "/rev":
+            return operation
+    return None
+
+
+def _reconcile_rev(client, target, document, exc):
+    """Return a refreshed document when ``exc`` is a stale-rev conflict the server
+    can reconcile, else ``None`` so the caller surfaces the original error.
+
+    Optimistic concurrency only: re-read the item and retry solely when its rev
+    has moved strictly forward from the value the caller held (the real signal
+    that the item changed, e.g. a commit auto-link bumping the rev). A rev that
+    did not advance — a caller-supplied value that was never live, or a field or
+    description expectation failure — is not a recoverable conflict.
+    """
+    if not isinstance(target, ExistingItem):
+        return None
+    held_op = _rev_test(document)
+    if held_op is None:
+        return None
+    held, current = held_op.value, client.read(target.item_id).get("rev")
+    if not (isinstance(held, int) and isinstance(current, int) and current > held):
+        return None
+    rebuilt = []
+    for operation in document:
+        if getattr(operation, "op", None) == "test" and getattr(operation, "path", None) == "/rev":
+            rebuilt.append(type(held_op)(op=held_op.op, path=held_op.path, value=current))
+        else:
+            rebuilt.append(operation)
+    return rebuilt
+
+
 def safe_mutate(*, client, target, document, expectation, apply):
-    """The safe-mutation lifecycle: validate-only → check → apply → read-back → check.
+    """The safe-mutation lifecycle: validate → check → apply → read-back → check.
 
     Returns ``{mode, id?, rev?}``; never prints. Fields and descriptions are checked
     against the validated item. Existing-item relations are checked against
-    persisted read-back because Azure update validation can omit them.
+    persisted read-back because Azure update validation can omit them. A stale-rev
+    conflict is retried once after re-reading the advanced revision; any other
+    failure, or a second conflict, surfaces immediately.
     """
-    checked = client.validate(document, target)
-    # Azure update validateOnly responses can omit relations even when the JSON
-    # Patch is accepted. Relation presence is therefore a persisted-state check.
-    _evaluate(checked, expectation, "Validation",
-              check_relation=not isinstance(target, ExistingItem))
-    if not apply: return {"mode": "validated"}
-    new_id = client.apply(document, target)
-    saved = client.read(new_id)
-    _evaluate(saved, expectation, "Read-back")
-    return {"mode": "applied", "id": new_id, "rev": saved["rev"]}
+    for attempt in (0, 1):
+        try:
+            checked = client.validate(document, target)
+            # Azure update validateOnly responses can omit relations even when the
+            # JSON Patch is accepted. Relation presence is a persisted-state check.
+            _evaluate(checked, expectation, "Validation",
+                      check_relation=not isinstance(target, ExistingItem))
+            if not apply: return {"mode": "validated"}
+            new_id = client.apply(document, target)
+            saved = client.read(new_id)
+            _evaluate(saved, expectation, "Read-back")
+            return {"mode": "applied", "id": new_id, "rev": saved["rev"]}
+        except Exception as exc:
+            refreshed = _reconcile_rev(client, target, document, exc)
+            if refreshed is None or attempt:
+                raise
+            document = refreshed
+    raise RuntimeError("safe_mutate exited without producing a result")
 
 
 def relation(args, kind, target):
@@ -244,16 +299,57 @@ def add_comment(args):
     emit({"mode": "applied", "id": args.id, "commentId": saved.get("id")})
 
 
+def _checklist_marker(body):
+    """Return ``(marker, checked)`` for a markdown checklist line, else ``(None, False)``."""
+    for marker in ("- [x]", "- [X]"):
+        if body.startswith(marker): return marker, True
+    if body.startswith("- [ ]"): return "- [ ]", False
+    return None, False
+
+
+def _toggle_checkboxes(description, selector):
+    """Return ``description`` with matching markdown checklist lines toggled.
+
+    ``selector == "all"`` toggles every checklist line; otherwise lines whose
+    item text (case-insensitive) contains ``selector`` are toggled. Raises when
+    nothing matched, so a typo cannot silently close an item.
+    """
+    matched, rendered = 0, []
+    for line in description.splitlines(keepends=True):
+        body, indent = line.lstrip(), line[:len(line) - len(line.lstrip())]
+        marker, checked = _checklist_marker(body)
+        if marker is None:
+            rendered.append(line); continue
+        rest = body[len(marker):]
+        if rest.startswith(" "): rest = rest[1:]
+        if selector == "all" or selector.lower() in rest.lower():
+            matched += 1
+            rendered.append(f"{indent}{'- [ ]' if checked else '- [x]'} {rest}")
+        else:
+            rendered.append(line)
+    if not matched:
+        raise RuntimeError(f"No acceptance criteria matched {selector!r}; nothing toggled.")
+    return "".join(rendered)
+
+
 def close_task(args):
     """Persist one final work-item patch and one Markdown completion comment.
 
-    The preflight revision avoids a redundant pre-write read. The patch's rev
-    test still prevents a write when the work item has changed.
+    ``--check-ac`` toggles acceptance-criteria checkboxes server-side (the current
+    Description is read, matching lines are toggled, and the full Description is
+    patched back), so flipping a checklist no longer requires a separate fetch,
+    local edit, and whole-Description rewrite. The preflight revision avoids a
+    redundant pre-write read; a stale-rev conflict auto-reconciles once.
     """
     client, cls = connect(args)
     comment = args.comment_file.read_text()
     if not comment.strip(): raise RuntimeError("Comment must not be empty.")
-    fields, text = {}, args.description_file.read_text() if args.description_file else None
+    fields, text = {}, None
+    if args.check_ac is not None:
+        stored = client.read(args.id).get("fields", {}).get("System.Description", "")
+        text = _toggle_checkboxes(html.unescape(stored), args.check_ac)
+    elif args.description_file is not None:
+        text = args.description_file.read_text()
     if args.state is not None: fields["System.State"] = args.state
     has_patch = text is not None or bool(fields)
     expected = args.expected_rev
@@ -288,14 +384,14 @@ def connection(parser, team=False):
 def parser():
     root = argparse.ArgumentParser(description=__doc__); commands = root.add_subparsers(required=True)
     current = commands.add_parser("current-sprint"); connection(current, True); current.set_defaults(run=lambda a: print(sprint(a)))
-    show = commands.add_parser("show"); connection(show); show.add_argument("--id", type=int, required=True); show.set_defaults(run=lambda a: emit(connect(a)[0].read(a.id)))
+    show = commands.add_parser("show"); connection(show); show.add_argument("--id", type=int, required=True); show.add_argument("--quiet", action="store_true"); show.set_defaults(run=show_item)
     preflight_p = commands.add_parser("implement-preflight"); connection(preflight_p); preflight_p.add_argument("--id", type=int, required=True); preflight_p.set_defaults(run=preflight)
     create_p = commands.add_parser("create"); connection(create_p, True); create_p.add_argument("--apply", action="store_true"); create_p.add_argument("--type", choices=("Epic", "Feature", "User Story", "Task", "Bug"), required=True); create_p.add_argument("--title", required=True); create_p.add_argument("--description-file", type=Path, required=True); create_p.add_argument("--iteration"); create_p.add_argument("--tags", action="append", default=[])
     for kind in RELATIONS: create_p.add_argument(f"--{kind}", action="append", type=int, default=[])
     create_p.set_defaults(run=create)
     update_p = commands.add_parser("update"); connection(update_p); update_p.add_argument("--apply", action="store_true"); update_p.add_argument("--id", type=int, required=True); update_p.add_argument("--description-file", type=Path); update_p.add_argument("--state"); update_p.add_argument("--iteration"); update_p.set_defaults(run=update)
     comment = commands.add_parser("add-comment"); connection(comment); comment.add_argument("--apply", action="store_true"); comment.add_argument("--id", type=int, required=True); comment.add_argument("--comment-file", type=Path, required=True); comment.set_defaults(run=add_comment)
-    close = commands.add_parser("close-task"); connection(close); close.add_argument("--apply", action="store_true"); close.add_argument("--id", type=int, required=True); close.add_argument("--expected-rev", type=int); close.add_argument("--description-file", type=Path); close.add_argument("--state"); close.add_argument("--comment-file", type=Path, required=True); close.set_defaults(run=close_task)
+    close = commands.add_parser("close-task"); connection(close); close.add_argument("--apply", action="store_true"); close.add_argument("--id", type=int, required=True); close.add_argument("--expected-rev", type=int); close.add_argument("--state"); close.add_argument("--comment-file", type=Path, required=True); close_body = close.add_mutually_exclusive_group(); close_body.add_argument("--description-file", type=Path); close_body.add_argument("--check-ac", metavar="all|FRAGMENT"); close.set_defaults(run=close_task)
     link = commands.add_parser("add-link"); connection(link); link.add_argument("--apply", action="store_true"); link.add_argument("--id", type=int, required=True); link.add_argument("--kind", choices=tuple(RELATIONS), required=True); link.add_argument("--target-id", type=int, required=True); link.set_defaults(run=add_link)
     return root
 

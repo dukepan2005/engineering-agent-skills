@@ -11,13 +11,14 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
+import html
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))                     # tests/   → fakes
 sys.path.insert(0, str(HERE.parent / "scripts"))  # scripts/ → azure_devops_boards
 
 from fakes import FakeClient, PatchOp  # noqa: E402
-from azure_devops_boards import RELATIONS, add_comment, add_link, close_task, create, parser, preflight, update  # noqa: E402
+from azure_devops_boards import RELATIONS, add_comment, add_link, close_task, create, parser, preflight, show_item, update  # noqa: E402
 
 ORG, PROJECT = "https://dev.azure.com/o", "P"
 
@@ -127,6 +128,15 @@ class AddLinkCommandTests(unittest.TestCase):
         self.assertEqual(fake.applies, 1)
         self.assertTrue(any(r["url"] == self._relation_value()["url"] for r in fake.read(self.ID)["relations"]))
 
+    def test_applied_mode_writes_and_emits(self):
+        fake = self._seeded()
+        out = _run(add_link, fake, self._args(apply=True))
+        self.assertEqual(out, {"mode": "applied", "id": self.ID, "kind": self.KIND, "targetId": self.TARGET})
+        self.assertEqual(fake.applies, 1)
+        rel = self._relation_value()
+        stored = fake.read(self.ID)
+        self.assertTrue(any(r["rel"] == rel["rel"] and r["url"] == rel["url"] for r in stored["relations"]))
+
     def test_applied_mode_accepts_project_guid_in_read_back_relation_url(self):
         class ProjectGuidRead(FakeClient):
             def read(self, item_id):
@@ -148,15 +158,6 @@ class AddLinkCommandTests(unittest.TestCase):
         out = _run(add_link, fake, self._args(apply=True))
         self.assertEqual(out, {"mode": "unchanged", "id": self.ID})
         self.assertEqual(fake.applies, 0)
-
-    def test_applied_mode_writes_and_emits(self):
-        fake = self._seeded()
-        out = _run(add_link, fake, self._args(apply=True))
-        self.assertEqual(out, {"mode": "applied", "id": self.ID, "kind": self.KIND, "targetId": self.TARGET})
-        self.assertEqual(fake.applies, 1)
-        rel = self._relation_value()
-        stored = fake.read(self.ID)
-        self.assertTrue(any(r["rel"] == rel["rel"] and r["url"] == rel["url"] for r in stored["relations"]))
 
 
 class AddCommentCommandTests(unittest.TestCase):
@@ -207,7 +208,7 @@ class ImplementationLifecycleTests(unittest.TestCase):
     def _close_args(self, apply, expected_rev=3, state="Closed"):
         return SimpleNamespace(organization=ORG, project=PROJECT, id=self.ID, apply=apply,
                                expected_rev=expected_rev, state=state, description_file=None,
-                               comment_file=_file("## Completion\nDone"))
+                               check_ac=None, comment_file=_file("## Completion\nDone"))
 
     def test_close_task_validates_without_writing(self):
         fake = self._seeded()
@@ -224,12 +225,22 @@ class ImplementationLifecycleTests(unittest.TestCase):
         self.assertEqual(fake.applies, 1)
         self.assertEqual(len(fake.comments[self.ID]), 1)
 
-    def test_close_task_stale_preflight_revision_prevents_patch_and_comment(self):
+    def test_close_task_unreconcilable_revision_prevents_patch_and_comment(self):
+        # A rev that did not move forward (here, ahead of the live rev) cannot be
+        # reconciled and must surface. A forward-moving rev is covered by CheckAc.
         fake = self._seeded()
         with self.assertRaises(RuntimeError):
-            _run(close_task, fake, self._close_args(apply=True, expected_rev=2))
+            _run(close_task, fake, self._close_args(apply=True, expected_rev=5))
         self.assertEqual(fake.applies, 0)
         self.assertEqual(fake.comments, {})
+
+    def test_close_task_reconciles_forward_rev_move(self):
+        # expected_rev lags the live rev (a commit auto-link bumped it); the patch
+        # auto-reconciles instead of forcing a manual re-preflight.
+        fake = self._seeded()  # rev 3
+        out = _run(close_task, fake, self._close_args(apply=True, expected_rev=2))
+        self.assertEqual(out["mode"], "applied")
+        self.assertEqual(fake.applies, 1)
 
     def test_close_task_comment_only_does_not_send_an_empty_work_item_patch(self):
         fake = self._seeded()
@@ -237,6 +248,76 @@ class ImplementationLifecycleTests(unittest.TestCase):
         self.assertEqual(out["rev"], None)
         self.assertEqual(fake.applies, 0)
         self.assertEqual(len(fake.comments[self.ID]), 1)
+
+
+class CloseTaskCheckAcTests(unittest.TestCase):
+    ID = 42
+
+    def _seeded(self):
+        fake = FakeClient.with_item(self.ID, rev=3)
+        fake.items[self.ID]["fields"].update({
+            "System.Title": "T", "System.State": "Active",
+            "System.Description": "- [ ] Write tests\n- [ ] Ship it\n- [x] Hold scope",
+        })
+        return fake
+
+    def _args(self, apply, check_ac, expected_rev=3, state="Closed"):
+        return SimpleNamespace(organization=ORG, project=PROJECT, id=self.ID, apply=apply,
+                               expected_rev=expected_rev, state=state,
+                               description_file=None, check_ac=check_ac,
+                               comment_file=_file("## Completion\nDone"))
+
+    def _description(self, fake):
+        return html.unescape(fake.read(self.ID)["fields"]["System.Description"])
+
+    def test_check_ac_all_toggles_every_line(self):
+        fake = self._seeded()
+        out = _run(close_task, fake, self._args(apply=True, check_ac="all"))
+        self.assertEqual(out["mode"], "applied")
+        self.assertEqual(self._description(fake), "- [x] Write tests\n- [x] Ship it\n- [ ] Hold scope")
+
+    def test_check_ac_fragment_toggles_only_matches_case_insensitively(self):
+        fake = self._seeded()
+        _run(close_task, fake, self._args(apply=True, check_ac="WRITE"))
+        self.assertEqual(self._description(fake), "- [x] Write tests\n- [ ] Ship it\n- [x] Hold scope")
+
+    def test_check_ac_no_match_raises_without_writing(self):
+        fake = self._seeded()
+        with self.assertRaises(RuntimeError) as cm:
+            _run(close_task, fake, self._args(apply=True, check_ac="nonexistent"))
+        self.assertIn("No acceptance criteria matched", str(cm.exception))
+        self.assertEqual(fake.applies, 0)
+        self.assertEqual(fake.comments, {})
+
+    def test_parser_rejects_check_ac_alongside_description_file(self):
+        with self.assertRaises(SystemExit):
+            parser().parse_args(["close-task", "--organization", ORG, "--project", PROJECT,
+                                 "--id", "42", "--check-ac", "all", "--description-file", "/tmp/x.md",
+                                 "--comment-file", "/tmp/c.md"])
+
+
+class ShowQuietTests(unittest.TestCase):
+    def test_show_default_emits_full_item(self):
+        fake = FakeClient.with_item(42, rev=3)
+        fake.items[42]["fields"].update({"System.Title": "T", "System.State": "Active"})
+        out = _run_with_func(show_item, fake, SimpleNamespace(organization=ORG, project=PROJECT, id=42, quiet=False))
+        self.assertEqual(out["id"], 42)
+        self.assertEqual(out["rev"], 3)
+        self.assertIn("fields", out)
+
+    def test_show_quiet_emits_compact_summary(self):
+        fake = FakeClient.with_item(42, rev=3)
+        fake.items[42]["fields"].update({"System.Title": "T", "System.State": "Active"})
+        out = _run_with_func(show_item, fake, SimpleNamespace(organization=ORG, project=PROJECT, id=42, quiet=True))
+        self.assertEqual(out, {"id": 42, "rev": 3, "type": "Task", "state": "Active", "title": "T", "relations": []})
+        self.assertNotIn("fields", out)
+
+
+def _run_with_func(func, fake, args):
+    with redirect_stdout(io.StringIO()) as buf, \
+            mock.patch("azure_devops_boards.connect", return_value=(fake, PatchOp)):
+        func(args)
+    return json.loads(buf.getvalue())
 
 
 if __name__ == "__main__":

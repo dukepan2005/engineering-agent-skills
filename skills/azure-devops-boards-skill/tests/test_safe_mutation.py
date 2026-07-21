@@ -23,6 +23,32 @@ from azure_devops_boards import (  # noqa: E402
 )
 
 
+class _RevAdvancesOnce(FakeClient):
+    """The item's rev advances once (e.g. a commit auto-link) before the first
+    validate, then stabilises — the recoverable stale-rev case."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._advanced = False
+
+    def validate(self, document, target):
+        if not self._advanced and not self._is_new(target):
+            self.items[target.item_id]["rev"] += 1
+            self._advanced = True
+            raise RuntimeError("rev mismatch (optimistic concurrency)")
+        return super().validate(document, target)
+
+
+class _RevAlwaysAdvances(FakeClient):
+    """The rev advances on every validate — a conflict that cannot reconcile."""
+
+    def validate(self, document, target):
+        if not self._is_new(target):
+            self.items[target.item_id]["rev"] += 1
+            raise RuntimeError("rev mismatch (optimistic concurrency)")
+        return super().validate(document, target)
+
+
 class ValidationGuardsTheWriteTests(unittest.TestCase):
     """Any expectation that fails at validation must prevent the write entirely."""
 
@@ -125,8 +151,29 @@ class OptimisticConcurrencyTests(unittest.TestCase):
         fake = FakeClient.with_item(42)  # rev == 1
         with self.assertRaises(RuntimeError) as cm:
             safe_mutate(client=fake, target=ExistingItem(42),
-                        document=[PatchOp("test", "/rev", 99)],  # stale rev
+                        document=[PatchOp("test", "/rev", 99)],  # never the live rev
                         expectation=Expectation(), apply=True)
+        self.assertIn("rev mismatch", str(cm.exception))
+        self.assertEqual(fake.applies, 0)
+
+    def test_stale_rev_reconciles_when_rev_advanced(self):
+        # Caller holds rev 1; the item advanced to 2 (forward move) — retry once.
+        fake = _RevAdvancesOnce.with_item(42)
+        result = safe_mutate(client=fake, target=ExistingItem(42),
+                             document=[PatchOp("test", "/rev", 1),
+                                       PatchOp("add", "/fields/System.State", "Active")],
+                             expectation=Expectation(fields={"System.State": "Active"}), apply=True)
+        self.assertEqual(result, {"mode": "applied", "id": 42, "rev": 3})
+        self.assertEqual(fake.applies, 1)
+
+    def test_rev_conflict_surfaces_after_one_retry(self):
+        # The rev never stops advancing — one retry, then surface the conflict.
+        fake = _RevAlwaysAdvances.with_item(42)
+        with self.assertRaises(RuntimeError) as cm:
+            safe_mutate(client=fake, target=ExistingItem(42),
+                        document=[PatchOp("test", "/rev", 1),
+                                  PatchOp("add", "/fields/System.State", "Active")],
+                        expectation=Expectation(fields={"System.State": "Active"}), apply=True)
         self.assertIn("rev mismatch", str(cm.exception))
         self.assertEqual(fake.applies, 0)
 
