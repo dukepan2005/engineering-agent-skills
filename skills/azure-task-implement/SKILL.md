@@ -97,32 +97,25 @@ revision.
 
 1. Collect the committed hash, implemented behavior, focused verification, and
    remaining work.
-2. If repository policy requires supported Markdown checklist changes, read the
-   current Description once, update only evidence-backed items, and prepare a
-   complete replacement Description. Otherwise do not read or rewrite it.
+2. If repository policy requires checklist synchronization, check off each
+   evidence-backed item with `close-task --check-ac` (see
+   `azure-devops-boards-skill`) instead of reading and rewriting the
+   Description yourself. Fall back to `--description-file` only when
+   acceptance criteria are not expressed as a markdown checklist.
 3. Prepare one concise Markdown comment from the
    [closeout-comment template](references/closeout-comment.md)
    (`## Completion`, `## Verification`, `## Remaining work`).
 4. Determine the final state only from explicit user input or repository
    guidance. If neither specifies one, leave state unchanged; do not assume
    `Closed` is universally valid.
-5. Run the helper's historically named `close-task` command once with `--apply`,
-   passing the preflight revision as `--expected-rev`. The helper validates,
-   applies, and read-back-checks in one call; the `/rev` test fails safely and
-   surfaces immediately if the item changed since preflight (e.g. a commit
-   auto-link bumped the rev, or someone edited it) — the helper never retries
-   automatically. Check acceptance criteria with `--check-ac all|FRAGMENT`
-   instead of rewriting the whole Description — it scans the entire Description
-   for markdown checklist syntax, not just a designated Acceptance Criteria
-   section, and a fragment must uniquely match one item (use `all` for every
-   item) — and include a state only when required. For a high-risk closeout,
-   the opt-in two-phase dry-run (run without `--apply`, review, then with
-   `--apply`) is still available.
-6. Accept completion only after the helper verifies the final work-item mutation
-   and Markdown comment. If an optimistic-concurrency conflict surfaces (the
-   `/rev` test failed because the item changed since preflight), rerun
-   preflight, reconcile the changed scope, and revalidate closeout — the helper
-   does not retry on its own.
+5. Run `close-task --apply`, passing the preflight revision as
+   `--expected-rev`, `--check-ac` for evidence-backed acceptance criteria, and
+   a state only when required. Follow the safety contract defined by
+   `azure-devops-boards-skill`: one call validates, applies, and
+   read-back-checks; a stale rev fails immediately with no automatic retry.
+6. Accept completion only after the helper verifies the final work-item
+   mutation and Markdown comment. If a rev conflict surfaces, rerun preflight,
+   reconcile the changed scope, and revalidate closeout.
 
 The helper may perform a work-item patch and a comment write. Treat their
 separate persisted checks as required; never describe them as one atomic Azure

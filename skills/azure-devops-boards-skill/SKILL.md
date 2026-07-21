@@ -10,44 +10,25 @@ Use the bundled helper for all Azure Boards operations. Do not reimplement Azure
 
 ## Resolve the helper
 
-The helper is `scripts/azure-devops-boards.sh`, invoked through `sh` by **absolute path**. A bare relative path fails — the shell runs from the project root, not the skill folder — so resolve the absolute path for your host:
-
-- **Claude Code** expands `${CLAUDE_SKILL_DIR}` to this skill's directory:
-  `sh "${CLAUDE_SKILL_DIR}/scripts/azure-devops-boards.sh" …`
-- **Codex** prints this skill's `SKILL.md` (e.g. `…/azure-devops-boards-skill/SKILL.md`) in its Skills section. Drop `SKILL.md` and append `scripts/azure-devops-boards.sh` for the helper's absolute path:
-  `sh …/azure-devops-boards-skill/scripts/azure-devops-boards.sh …`
-
-Set `HELPER` to the resolved path, then use `sh "$HELPER"` in the examples below. If
-`${CLAUDE_SKILL_DIR}` is unset (e.g. outside a skill invocation), resolve the path
-directly: under Claude Code the skill lives at `~/.claude/skills/azure-devops-boards-skill/`,
-so the helper is `~/.claude/skills/azure-devops-boards-skill/scripts/azure-devops-boards.sh`
-(under the plugin cache for plugin installs).
+The helper is `scripts/azure-devops-boards.sh`, invoked through `sh` by **absolute path** — a bare relative path fails, since the shell runs from the project root, not the skill folder. Resolve the exact path for your host from [references/setup.md](references/setup.md), set `HELPER` to it, then use `sh "$HELPER"` in the examples below.
 
 ## Require configuration
 
-Require an installed, authenticated Azure CLI with the `azure-devops` extension. Pass connection flags explicitly or use:
+Require an installed, authenticated Azure CLI with the `azure-devops` extension. Pass connection flags explicitly, or set these once per shell session to make them optional on every call:
 
-- `AZURE_DEVOPS_ORG`
-- `AZURE_DEVOPS_PROJECT`
-- `AZURE_DEVOPS_TEAM`
+- `AZURE_DEVOPS_ORG`, `AZURE_DEVOPS_PROJECT`, `AZURE_DEVOPS_TEAM`
 - `AZURE_CLI_PYTHON` when the launcher cannot locate Azure CLI's Python runtime
-
-The helper reads `AZURE_DEVOPS_ORG`/`AZURE_DEVOPS_PROJECT`/`AZURE_DEVOPS_TEAM` as
-defaults and makes those flags optional when set, so exporting them once per shell
-session avoids repeating `--organization`/`--project` on every call.
 
 Read the repository's tracker instructions before operating. Treat its work-item types, states, Sprint rules, tags, acceptance criteria, and workflow gates as authoritative.
 
-## Follow the safety workflow
+## Invariants
 
-1. Read the relevant work item before changing it.
-2. Prepare long descriptions and comments in temporary Markdown files.
-3. When repository rules require checklist synchronization, update only acceptance criteria backed by implementation and verification evidence, and keep the work item out of any completed state until every required criterion is checked. Preserve the rest of the Description and verify it before changing state.
-4. **Default:** run a mutation once with `--apply`. The helper validates server-side, applies, and read-back-checks the persisted result in a single call — that internal validate-plus-read-back is the safety net, so a separate dry-run is not required for routine writes.
-5. **Opt-in two-phase** for high-risk changes or when a human should review before the write: run the identical command without `--apply` (dry-run), review the validated summary, then repeat it with `--apply`.
-6. Accept success only after the helper's persisted read-back succeeds.
-
-`az boards work-item update --discussion` is off-limits: it posts plain text, not a native relation. Express dependencies with `add-link` instead.
+- Read the relevant work item before changing it.
+- Prepare long descriptions and comments in temporary Markdown files.
+- When repository rules require checklist synchronization, check off each evidence-backed item with `close-task --check-ac` (it touches only the matching line and leaves the rest of the Description untouched) and keep the work item out of any completed state until every required criterion is checked.
+- Run a mutation once with `--apply` by default — the helper validates server-side, applies, and read-back-checks the persisted result in a single call. Use the opt-in two-phase form (the identical command without `--apply`, reviewed, then repeated with `--apply`) only for high-risk changes or when a human should review before the write.
+- A stale `/rev` — the item changed since it was read — fails the mutation immediately, with no automatic retry. Re-read and reconcile before retrying.
+- `az boards work-item update --discussion` is off-limits: it posts plain text, not a native relation. Express dependencies with `add-link` instead.
 
 ## Use the commands
 
@@ -76,7 +57,7 @@ sh "$HELPER" close-task \
   --check-ac all     # or --check-ac 'ships the contract' to check only the matching AC
 ```
 
-Add `--apply` after validation. `--check-ac` reads the live Description, checks the matching markdown checkboxes (`all` or a case-insensitive fragment) without unchecking any that are already checked, and patches it back in the same mutation — use it instead of fetching and rewriting the whole Description. It scans the entire Description for markdown checklist syntax, not a designated Acceptance Criteria heading or section; a fragment must uniquely match exactly one checklist item (ambiguous fragments raise), and `all` checks every item. It is mutually exclusive with `--description-file`. For `predecessor`, `--target-id` blocks the current `--id`. For `parent`, the target is the current item's parent. Re-adding an existing relation returns `unchanged`.
+Add `--apply` after validation. `--check-ac` reads the live Description, checks the matching markdown checkboxes (`all`, or a case-insensitive fragment that must uniquely match exactly one item — ambiguous fragments raise) without unchecking any that are already checked, and patches it back in the same mutation; it scans the whole Description, not a designated Acceptance Criteria section, and is mutually exclusive with `--description-file`. For `predecessor`, `--target-id` blocks the current `--id`. For `parent`, the target is the current item's parent. Re-adding an existing relation returns `unchanged`.
 
 ## Keep implementation synchronization compact
 
@@ -88,16 +69,9 @@ thread. Re-run only after an item, branch, or session change, or when a scope
 conflict appears.
 
 At closeout, run `close-task` once with `--apply`, passing the preflight `rev`
-as `--expected-rev` to avoid an extra pre-write read. The JSON Patch's `/rev`
-test fails safely and surfaces immediately if the item changed since it was
-read (for example a commit's `Refs AB#123` auto-link bumped the rev, or someone
-else edited it) — the helper does not retry on your behalf; re-run
-`implement-preflight`, reconcile the changed scope, and retry manually.
-Check acceptance criteria with `--check-ac all|FRAGMENT` instead of fetching
-and rewriting the whole Description. `close-task` can update Description and
-state in one work-item mutation and post one Markdown completion comment; it
-verifies both persisted results, and the two Azure operations are not atomic.
-For a high-risk closeout, the opt-in two-phase dry-run (run without `--apply`,
-then with) is still available.
+as `--expected-rev` — the invariants above apply unchanged (one call, fail-fast
+on a stale rev, no retry). `close-task` can update Description and state in one
+work-item mutation and post one Markdown completion comment; it verifies both
+persisted results, and the two Azure operations are not atomic.
 
 Read [references/azure-boards-api.md](references/azure-boards-api.md) only when endpoint behavior or relation semantics need investigation.
