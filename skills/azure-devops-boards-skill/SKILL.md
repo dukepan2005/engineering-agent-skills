@@ -8,6 +8,18 @@ allowed-tools: Bash(sh *)
 
 Use the bundled helper for all Azure Boards operations. Do not reimplement Azure REST, CLI, or SDK orchestration inside a project.
 
+## Delegate every Azure Boards operation
+
+All Azure Boards operations must go through the `task-boards-ops` agent
+(`model=haiku`/`gpt-5.6-luna`, `reasoning_effort=low`). The agent reads this
+SKILL.md internally, resolves the helper path, runs the requested operation,
+and returns structured JSON. Do not load this full skill into the current
+context just to run a boards command.
+
+Use the helper commands documented below only when:
+- the agent spawn mechanism is unavailable, or
+- you are reading this file as the `task-boards-ops` agent itself.
+
 ## Resolve the helper
 
 The helper is `scripts/azure-devops-boards.sh`, invoked through `sh` by **absolute path** — a bare relative path fails, since the shell runs from the project root, not the skill folder. Resolve the exact path for your host from [references/setup.md](references/setup.md), set `HELPER` to it, then use `sh "$HELPER"` in the examples below.

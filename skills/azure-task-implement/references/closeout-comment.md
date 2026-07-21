@@ -24,5 +24,3 @@ Notes:
 - Write the file once; `close-task` HTML-escapes and Markdown-stamps it. No manual
   escaping of `<`, `>`, `&`, or backticks is needed.
 - Quote commands verbatim inside backticks so reviewers can reproduce them.
-- If the change took the trivial fast-path (see SKILL.md), this same template fits
-  the `add-comment` used in place of `close-task`.

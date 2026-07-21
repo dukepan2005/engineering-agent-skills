@@ -11,9 +11,13 @@ Do not implement, review, or close work items in the orchestrator itself.
 
 ## Require Direct Skills Before Work
 
-Before reading tracker data or spawning a worker, use the `task-model-planner`
-and `azure-task-implement` skills, plus a subagent spawn primitive that accepts
-an explicit model and reasoning effort.
+Before reading tracker data or spawning a worker, use the `task-model-planner`,
+`azure-task-implement`, and `task-boards-ops` agents, plus a subagent spawn
+primitive that accepts an explicit model and reasoning effort. The
+`task-boards-ops` agent has a fixed model in its definition; spawn it by name
+without a model override. It covers all Azure Boards reads and mutations
+(show, preflight, create, update, close-task, add-comment, add-link,
+current-sprint).
 
 For each Skill, accept one of these ways to obtain its instructions:
 
@@ -78,52 +82,96 @@ plan requires a newly displayed plan and new confirmation.
 
 ## Deliver Sequentially
 
-For each work item in the validated execution plan:
+For each work item in the validated execution plan, run three sequential steps.
+Only one work item at a time. Do not start the next work item until the current
+one is complete.
 
-1. Resolve the work item's planned profile ID through the canonical registry. On
-   Codex, call `spawn_agent` with its exact `model` and `reasoning_effort`, and
-   a normalized `task_name` containing the work-item ID and planned profile, for
-   example `delivery_sol_xhigh_ab_175`. The name is only a task label; it does
-   not select a custom agent configuration. Do not start the next worker until
-   this worker has returned a terminal result.
-2. If the host rejects that spawn before the worker starts and explicitly reports
-   the requested reasoning effort or capacity as unavailable, read the planned
-   profile's `Pre-start capacity fallback` from the canonical registry. When it
-   has a value, retry exactly once with that profile's exact mapping and a new
-   `task_name`. Record both profile IDs and the host error. If it has no value,
-   the error is model-wide availability, the error is not recognizable, or the
-   retry fails, stop the sequence. Do not retry after a worker begins, across
-   models, or for a work-item-level failure.
-3. Give the worker only its work-item ID and type, planned profile ID, effective
-   profile ID, relevant planner evidence and order reason, the resolved
-   `azure-task-implement` skill source, plus this instruction:
+### 1. Preflight — spawn cheap agent
 
-   ```text
-   Use the `azure-task-implement` skill to deliver exactly <work-item ID> in the
-   current workspace and branch. When it is supplied by Context or Path, read its
-   complete supplied body or resolved SKILL.md before acting. Re-read current
-   tracker and repository authority; the planner is not a substitute for
-   preflight. Do not implement another work item. Do not reject or convert this
-   item solely because its Azure type is not Task. The effective execution
-   profile is fixed for this worker. Follow all repository guidance and return
-   the compact delivery summary.
-   ```
+Spawn an agent with `model=gpt-5.6-luna` and `reasoning_effort=low`. On Codex,
+call `spawn_agent` with these parameters directly. On a host that supports
+named agent types, spawn the `task-boards-ops` agent instead.
 
-4. Let the `azure-task-implement` skill own that work item's preflight, implementation,
-   verification, review, commit, and Azure closeout. Do not duplicate any of
-   those operations in the parent.
-5. Require the worker to finish before inspecting its result. Keep the shared
-   workspace untouched while a worker runs.
-6. On a successful worker result, record its compact summary and dispatch the
-   next listed work item. On any failure, incomplete verification, uncommitted
-   result, blocker, or uncertain closeout, stop immediately. Do not dispatch
-   later work items, retry at a stronger profile, use a lower profile outside the
-   pre-start capacity rule, or re-plan silently.
+Give it the work-item ID, the repo root path, and the instruction:
 
-Run only one delivery worker at a time even when work items look independent.
-This preserves the clean-worktree requirement of the `azure-task-implement` skill,
-preserves the planned dependency order, and makes each work item's commit and
-tracker closeout auditable.
+```text
+Perform preflight for work item <id>. The skill directory is at <repo-root>/skills/azure-devops-boards-skill. Return the structured scope JSON.
+```
+
+Collect the preflight result. If the spawn fails or the agent returns an error
+(no such item, wrong state, blocked by a relation), stop immediately. Do not
+proceed to the implement step.
+
+### 2. Implement — spawn planner-specified agent
+
+Resolve the work item's planned profile ID through the canonical registry. On
+Codex, call `spawn_agent` with its exact `model` and `reasoning_effort`, and
+a normalized `task_name` containing the work-item ID and planned profile, for
+example `delivery_sol_xhigh_ab_175`. The name is only a task label; it does
+not select a custom agent configuration.
+
+If the host rejects that spawn before the worker starts and explicitly reports
+the requested reasoning effort or capacity as unavailable, read the planned
+profile's `Pre-start capacity fallback` from the canonical registry. When it
+has a value, retry exactly once with that profile's exact mapping and a new
+`task_name`. Record both profile IDs and the host error. If it has no value,
+the error is model-wide availability, the error is not recognizable, or the
+retry fails, stop the sequence. Do not retry after a worker begins, across
+models, or for a work-item-level failure.
+
+Give the worker its work-item ID and type, planned profile ID, effective
+profile ID, relevant planner evidence and order reason, the resolved
+`azure-task-implement` skill source, the preflight scope from step 1, plus
+this instruction:
+
+```text
+Use the `azure-task-implement` skill to implement work item <id> in the current
+workspace and branch. The preflight scope is provided below. Read the resolved
+SKILL.md before acting. Re-read repository authority; the planner is not a
+substitute for repo guidance. The effective execution profile is fixed for this
+worker. Do not perform Azure Boards operations.
+
+Return the compact delivery summary with commit hash, changed areas,
+verification evidence, remaining work, and a filled closeout comment based on
+the template at <repo-root>/skills/azure-task-implement/references/closeout-comment.md.
+
+<preflight scope JSON>
+```
+
+Let the `azure-task-implement` skill own that work item's implementation,
+verification, review, and commit. Do not duplicate any of those operations in
+the parent. Require the worker to finish before inspecting its result. Keep the
+shared workspace untouched while a worker runs. On failure, incomplete
+verification, uncommitted result, blocker, or uncertain outcome, stop
+immediately. Do not dispatch later work items.
+
+### 3. Closeout — spawn cheap agent
+
+Spawn an agent with `model=gpt-5.6-luna` and `reasoning_effort=low` (same as
+step 1: Codex uses `spawn_agent` directly; hosts with named agent types use
+`task-boards-ops`).
+
+Closeout policy (apply before spawning):
+- Write the closeout comment returned by step 2 into a temporary Markdown file.
+- Use `--check-ac all` unless only a specific subset of acceptance criteria are
+  evidence-backed, in which case use a fragment that uniquely matches that item.
+- Pass `--state` only when the user or repository guidance explicitly requires
+  a final state. If neither specifies one, leave the state unchanged.
+
+Give the agent the work-item ID, the preflight revision from step 1, the
+repo root path, the skill directory path (`<repo-root>/skills/azure-devops-boards-skill`), and the temporary comment file path:
+
+```text
+Run `close-task --apply --id <id> --expected-rev <rev> --check-ac <all|fragment> --comment-file <tmpfile> [--state <state>]`. The skill directory is at <repo-root>/skills/azure-devops-boards-skill. Return the result JSON.
+```
+
+Collect the closeout result. If the closeout fails because the expected rev is
+stale, stop immediately; do not retry automatically. The work item changed
+since preflight, so the current item must be re-preflighted and the
+implementation result reconciled before closeout is attempted again. Do not
+proceed to the next work item.
+
+Dispatch the next work item only after all three steps complete successfully.
 
 ## Report
 

@@ -6,19 +6,20 @@ its own triggering and runtime instructions.
 
 ## Catalog
 
-| Skill | Purpose |
+| Skill / Agent | Purpose |
 |---|---|
 | [`azure-devops-boards-skill`](skills/azure-devops-boards-skill/) | Safely read and mutate Azure DevOps Boards work items through the locally authenticated Azure CLI. |
-| [`azure-task-implement`](skills/azure-task-implement/) | Wrap `$implement` with compact Azure Boards work-item preflight and closeout. |
+| [`azure-task-implement`](skills/azure-task-implement/) | Implement code for one Azure Boards work item, using the preflight scope from the orchestrator. |
+| [`task-boards-ops`](.claude/agents/task-boards-ops.md) | Cheap agent (haiku, low reasoning) for all Azure Boards operations (show, preflight, create, update, close-task, add-comment, add-link, current-sprint). On Codex, use gpt-5.6-luna via spawn_agent. |
 | [`task-model-planner`](skills/task-model-planner/) | Recommend one named, lowest-reliable execution profile for each work item. |
-| [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver a Story's implementation-ready work items in order, each in a named-profile subagent. |
+| [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver a Story's work items: preflight via cheap agent, implement via named-profile agent, closeout via cheap agent. |
 
 ## Third-Party Dependency
 
-`azure-task-implement` wraps the third-party `$implement` workflow. Installing
-this repository does **not** install Skills from
-[`mattpocock/skills`](https://github.com/mattpocock/skills). Before using the
-wrapper, install its required `$implement` Skill separately for the same agent
+`azure-task-implement` and the orchestrator both wrap the third-party
+`$implement` workflow. Installing this repository does **not** install Skills
+from [`mattpocock/skills`](https://github.com/mattpocock/skills). Before using
+either, install its required `$implement` Skill separately for the same agent
 host; `$tdd` is recommended because `$implement` uses it when appropriate.
 
 For Codex, for example:
@@ -27,9 +28,10 @@ For Codex, for example:
 npx skills@latest add mattpocock/skills
 ```
 
-The wrapper also requires this repository's `$azure-devops-boards-skill`. It
-checks every dependency before it begins a work item, stops and reports a missing
-dependency, and never installs one automatically.
+The orchestrator also requires this repository's `$azure-devops-boards-skill`
+and the `task-boards-ops` agent. It checks every dependency before it begins a
+work item, stops and reports a missing dependency, and never installs one
+automatically.
 
 `$azure-devops-boards-skill` also requires a locally authenticated Azure CLI
 with the Azure DevOps extension:
@@ -78,29 +80,42 @@ and command examples.
 
 ### Azure Task delivery
 
-Invoke this wrapper to implement one implementation-ready Azure Boards work item
-without reproducing a project-specific tracker gate:
+The orchestrator handles the full lifecycle of a work item, delegating Azure
+Boards mechanical operations (preflight, closeout) to a cheap `task-boards-ops`
+agent and code implementation to a planner-specified agent:
+
+```text
+$azure-task-orchestrator AB#168
+```
+
+It runs three sequential subagents per work item:
+1. **Preflight** (cheap model, low reasoning) — reads the Azure Boards work item
+   and returns a structured scope snapshot.
+2. **Implement** (planner-specified model) — delegates to the `$implement`
+   workflow for code, tests, and commit.
+3. **Closeout** (cheap model, low reasoning) — checks off acceptance criteria,
+   posts a completion comment, and closes the work item.
+
+Use `$azure-task-implement` directly only when the orchestrator has already
+performed preflight and you need just the code implementation step:
 
 ```text
 $azure-task-implement AB#169
 ```
 
-It runs one compact tracker preflight, then delegates implementation, testing,
-review, and commit to the complete `$implement` workflow before performing
-validated Markdown-safe closeout. Use `$azure-task-implement AB#169 --state
-Closed` only when the final state is explicitly known; otherwise the wrapper
-preserves the current state. Eligibility is based on bounded implementation
-scope, not `System.WorkItemType`; do not convert a Bug into a Task to use it.
-
 #### Dependencies
 
-This wrapper does not bundle or install third-party Skills. Before invoking it,
-install `$implement` from
-[`mattpocock/skills`](https://github.com/mattpocock/skills), and install this
-repository's `$azure-devops-boards-skill` for the same agent host. It checks
-both before reading or changing a work item and stops with the relevant install
-command if one is unavailable. `$tdd` from `mattpocock/skills` is recommended,
-because `$implement` uses it where appropriate.
+These wrappers do not bundle or install third-party Skills.
+
+- `$azure-task-implement` requires only `$implement` from
+  [`mattpocock/skills`](https://github.com/mattpocock/skills).
+- `$azure-task-orchestrator` requires `$implement`, this repository's
+  `$azure-devops-boards-skill`, and the `task-boards-ops` agent.
+
+The orchestrator checks all dependencies before reading or changing a work item
+and stops with the relevant install command if one is unavailable. `$tdd` from
+`mattpocock/skills` is recommended, because `$implement` uses it where
+appropriate.
 
 ### Task model planning
 
@@ -116,37 +131,25 @@ single mapping from profile ID to model and reasoning effort.
 
 ### Recommended delivery flow
 
+Always use the orchestrator for full lifecycle delivery:
+
 ```text
 $task-model-planner <Story>
-$azure-task-implement <work-item>
+$azure-task-orchestrator <Story>
 ```
 
-### Profile-planned sequential delivery
-
-Use the orchestrator when every implementation-ready work item in a Story or
-explicit set should be planned first and then delivered sequentially by
-subagents with the recommended execution profile:
-
-```text
-$azure-task-orchestrator AB#168
-```
-
-It resolves each profile ID through `$task-model-planner`'s canonical registry,
-then creates a named subagent with that exact model and reasoning effort. If
-the host rejects the requested effort before the worker starts, it may make one
-same-model, lower-effort retry from that registry and records both profiles.
-It validates and displays the planner's ordered report, then waits for explicit
-user confirmation before dispatching any work item. It stops the sequence on the
-first unsuccessful worker; it never substitutes the parent model or runs work items
-in parallel. It accepts a dependency Skill supplied natively by the host, as a
-complete `<skill>` block in the current context, or by an explicit readable
-`SKILL.md` path; it runs them directly as `/task-model-planner` and
-`/azure-task-implement`.
+The orchestrator resolves each profile ID through `$task-model-planner`'s
+canonical registry, then runs three sequential subagents per work item:
+preflight (cheap model), implement (planner-specified model), closeout (cheap
+model). It validates and displays the planner's ordered report, waits for
+explicit user confirmation before dispatching, and stops the sequence on the
+first unsuccessful worker. It never substitutes the parent model or runs work
+items in parallel.
 
 `$implement` is supplied by the agent host or your own installed implementation
-workflow. `$azure-task-implement` requires it plus
-`$azure-devops-boards-skill`; the planning Skill never edits code, Git state, or
-Azure Boards.
+workflow. The orchestrator requires it plus `$azure-devops-boards-skill` and
+`task-boards-ops`; the planning Skill never edits code, Git state, or Azure
+Boards.
 
 ## Development
 
