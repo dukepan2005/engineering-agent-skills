@@ -32,8 +32,13 @@ Before starting, self-assess the scope:
   or a fix whose correctness is obvious by inspection — takes the fast-path:
   edit, commit, then a single `update` (state only, if needed) plus one
   `add-comment` with the completion summary. Skip `implement-preflight` and
-  `close-task`; do not toggle checklist items that were never the authority for
+  `close-task`; do not check checklist items that were never the authority for
   the work.
+- **Trivial never applies, regardless of file count**, when the change touches:
+  CI/CD or workflow configuration; permissions, auth, or other security-sensitive
+  code; data migrations; API or contract changes; dependency or version bumps;
+  or production configuration — or when the work item carries its own explicit
+  acceptance criteria. Those always take the full lifecycle below.
 - **Anything else** — logic changes, multi-file behaviour, an item whose
   acceptance criteria are the source of truth — runs the full lifecycle below.
 
@@ -103,16 +108,21 @@ revision.
    `Closed` is universally valid.
 5. Run the helper's historically named `close-task` command once with `--apply`,
    passing the preflight revision as `--expected-rev`. The helper validates,
-   applies, and read-back-checks in one call; a forward-moving rev (e.g. a commit
-   auto-link) auto-reconciles once. Toggle acceptance criteria with
-   `--check-ac all|FRAGMENT` instead of rewriting the whole Description, and
-   include a state only when required. For a high-risk closeout, the opt-in
-   two-phase dry-run (run without `--apply`, review, then with `--apply`) is
-   still available.
+   applies, and read-back-checks in one call; the `/rev` test fails safely and
+   surfaces immediately if the item changed since preflight (e.g. a commit
+   auto-link bumped the rev, or someone edited it) — the helper never retries
+   automatically. Check acceptance criteria with `--check-ac all|FRAGMENT`
+   instead of rewriting the whole Description — it scans the entire Description
+   for markdown checklist syntax, not just a designated Acceptance Criteria
+   section, and a fragment must uniquely match one item (use `all` for every
+   item) — and include a state only when required. For a high-risk closeout,
+   the opt-in two-phase dry-run (run without `--apply`, review, then with
+   `--apply`) is still available.
 6. Accept completion only after the helper verifies the final work-item mutation
-   and Markdown comment. If an irreconcilable optimistic-concurrency conflict
-   remains after the helper's one retry, rerun preflight, reconcile the changed
-   scope, and revalidate closeout.
+   and Markdown comment. If an optimistic-concurrency conflict surfaces (the
+   `/rev` test failed because the item changed since preflight), rerun
+   preflight, reconcile the changed scope, and revalidate closeout — the helper
+   does not retry on its own.
 
 The helper may perform a work-item patch and a comment write. Treat their
 separate persisted checks as required; never describe them as one atomic Azure

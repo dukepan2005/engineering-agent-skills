@@ -107,18 +107,26 @@ def assert_description(item, text):
     if html.unescape(stored) != text or item.get("multilineFieldsFormat", {}).get("System.Description") != "markdown": raise RuntimeError("Description or Markdown metadata did not persist.")
 
 
-def _relation_work_item_id(url):
-    """Return the stable work-item ID from an Azure relation URL, if present."""
-    target = url.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
-    return int(target) if target.isdigit() else None
+def _relation_identity(url):
+    """Return ``(org_prefix, work_item_id)`` for an Azure work-item relation URL,
+    ignoring only the project segment (name vs GUID varies) — organization/host
+    and the API shape must still match. ``None`` if the URL isn't shaped like a
+    work-item API URL."""
+    base, sep, rest = url.partition("/_apis/wit/workItems/")
+    if not sep:
+        return None
+    target = rest.split("?", 1)[0].rstrip("/")
+    if not target.isdigit():
+        return None
+    return base.rsplit("/", 1)[0], int(target)
 
 
 def _has_relation(item, rel, url):
-    expected_id = _relation_work_item_id(url)
+    expected_identity = _relation_identity(url)
     return any(
         stored.get("rel") == rel and (
-            stored.get("url") == url if expected_id is None
-            else _relation_work_item_id(stored.get("url", "")) == expected_id
+            stored.get("url") == url if expected_identity is None
+            else _relation_identity(stored.get("url", "")) == expected_identity
         )
         for stored in item.get("relations", [])
     )
@@ -191,68 +199,23 @@ def _evaluate(item, expectation, phase, *, check_relation=True):
         if not _has_relation(item, rel, url): raise RuntimeError(f"{phase} failed for relation {rel}.")
 
 
-def _rev_test(document):
-    """The ``/rev`` optimistic-concurrency test op, if the document carries one."""
-    for operation in document:
-        if getattr(operation, "op", None) == "test" and getattr(operation, "path", None) == "/rev":
-            return operation
-    return None
-
-
-def _reconcile_rev(client, target, document, exc):
-    """Return a refreshed document when ``exc`` is a stale-rev conflict the server
-    can reconcile, else ``None`` so the caller surfaces the original error.
-
-    Optimistic concurrency only: re-read the item and retry solely when its rev
-    has moved strictly forward from the value the caller held (the real signal
-    that the item changed, e.g. a commit auto-link bumping the rev). A rev that
-    did not advance — a caller-supplied value that was never live, or a field or
-    description expectation failure — is not a recoverable conflict.
-    """
-    if not isinstance(target, ExistingItem):
-        return None
-    held_op = _rev_test(document)
-    if held_op is None:
-        return None
-    held, current = held_op.value, client.read(target.item_id).get("rev")
-    if not (isinstance(held, int) and isinstance(current, int) and current > held):
-        return None
-    rebuilt = []
-    for operation in document:
-        if getattr(operation, "op", None) == "test" and getattr(operation, "path", None) == "/rev":
-            rebuilt.append(type(held_op)(op=held_op.op, path=held_op.path, value=current))
-        else:
-            rebuilt.append(operation)
-    return rebuilt
-
-
 def safe_mutate(*, client, target, document, expectation, apply):
     """The safe-mutation lifecycle: validate → check → apply → read-back → check.
 
     Returns ``{mode, id?, rev?}``; never prints. Fields and descriptions are checked
     against the validated item. Existing-item relations are checked against
-    persisted read-back because Azure update validation can omit them. A stale-rev
-    conflict is retried once after re-reading the advanced revision; any other
-    failure, or a second conflict, surfaces immediately.
+    persisted read-back because Azure update validation can omit them. A stale
+    ``/rev`` test (the item changed since it was read) surfaces immediately —
+    the caller must re-read and reconcile before retrying.
     """
-    for attempt in (0, 1):
-        try:
-            checked = client.validate(document, target)
-            # Azure update validateOnly responses can omit relations even when the
-            # JSON Patch is accepted. Relation presence is a persisted-state check.
-            _evaluate(checked, expectation, "Validation",
-                      check_relation=not isinstance(target, ExistingItem))
-            if not apply: return {"mode": "validated"}
-            new_id = client.apply(document, target)
-            saved = client.read(new_id)
-            _evaluate(saved, expectation, "Read-back")
-            return {"mode": "applied", "id": new_id, "rev": saved["rev"]}
-        except Exception as exc:
-            refreshed = _reconcile_rev(client, target, document, exc)
-            if refreshed is None or attempt:
-                raise
-            document = refreshed
-    raise RuntimeError("safe_mutate exited without producing a result")
+    checked = client.validate(document, target)
+    _evaluate(checked, expectation, "Validation",
+              check_relation=not isinstance(target, ExistingItem))
+    if not apply: return {"mode": "validated"}
+    new_id = client.apply(document, target)
+    saved = client.read(new_id)
+    _evaluate(saved, expectation, "Read-back")
+    return {"mode": "applied", "id": new_id, "rev": saved["rev"]}
 
 
 def relation(args, kind, target):
@@ -308,14 +271,16 @@ def _checklist_marker(body):
     return None, False
 
 
-def _toggle_checkboxes(description, selector):
-    """Return ``description`` with matching markdown checklist lines toggled.
+def _check_checkboxes(description, selector):
+    """Return ``description`` with matching markdown checklist lines marked checked.
 
-    ``selector == "all"`` toggles every checklist line; otherwise lines whose
-    item text (case-insensitive) contains ``selector`` are toggled. Raises when
-    nothing matched, so a typo cannot silently close an item.
+    ``selector.casefold() == "all"`` matches every checklist line; otherwise
+    exactly one line whose item text (case-insensitive) contains ``selector``
+    must match — ambiguous or missing matches raise rather than guess. Already
+    checked lines are left unchanged, so re-running the same selector is a no-op.
     """
-    matched, rendered = 0, []
+    is_all = selector.casefold() == "all"
+    matches, rendered = [], []
     for line in description.splitlines(keepends=True):
         body, indent = line.lstrip(), line[:len(line) - len(line.lstrip())]
         marker, checked = _checklist_marker(body)
@@ -323,39 +288,42 @@ def _toggle_checkboxes(description, selector):
             rendered.append(line); continue
         rest = body[len(marker):]
         if rest.startswith(" "): rest = rest[1:]
-        if selector == "all" or selector.lower() in rest.lower():
-            matched += 1
-            rendered.append(f"{indent}{'- [ ]' if checked else '- [x]'} {rest}")
-        else:
-            rendered.append(line)
-    if not matched:
-        raise RuntimeError(f"No acceptance criteria matched {selector!r}; nothing toggled.")
+        if not (is_all or selector.lower() in rest.lower()):
+            rendered.append(line); continue
+        matches.append(rest.strip())
+        rendered.append(line if checked else f"{indent}- [x] {rest}")
+    if not matches:
+        raise RuntimeError(f"No acceptance criteria matched {selector!r}; nothing checked.")
+    if not is_all and len(matches) > 1:
+        raise RuntimeError(f"Fragment {selector!r} matched {len(matches)} acceptance criteria ({'; '.join(matches)}); use a more specific fragment or --check-ac all.")
     return "".join(rendered)
 
 
 def close_task(args):
     """Persist one final work-item patch and one Markdown completion comment.
 
-    ``--check-ac`` toggles acceptance-criteria checkboxes server-side (the current
-    Description is read, matching lines are toggled, and the full Description is
-    patched back), so flipping a checklist no longer requires a separate fetch,
-    local edit, and whole-Description rewrite. The preflight revision avoids a
-    redundant pre-write read; a stale-rev conflict auto-reconciles once.
+    ``--check-ac`` checks acceptance-criteria checkboxes server-side (the current
+    Description is read, matching unchecked lines are checked, and the full
+    Description is patched back), so marking an item done no longer requires a
+    separate fetch, local edit, and whole-Description rewrite. The preflight
+    revision avoids a redundant pre-write read.
     """
     client, cls = connect(args)
     comment = args.comment_file.read_text()
     if not comment.strip(): raise RuntimeError("Comment must not be empty.")
-    fields, text = {}, None
+    fields, text, read_rev = {}, None, None
     if args.check_ac is not None:
-        stored = client.read(args.id).get("fields", {}).get("System.Description", "")
-        text = _toggle_checkboxes(html.unescape(stored), args.check_ac)
+        item = client.read(args.id)
+        read_rev = item["rev"]
+        stored = item.get("fields", {}).get("System.Description", "")
+        text = _check_checkboxes(html.unescape(stored), args.check_ac)
     elif args.description_file is not None:
         text = args.description_file.read_text()
     if args.state is not None: fields["System.State"] = args.state
     has_patch = text is not None or bool(fields)
     expected = args.expected_rev
     if expected is None and has_patch:
-        expected = client.read(args.id)["rev"]
+        expected = read_rev if read_rev is not None else client.read(args.id)["rev"]
     if not args.apply:
         if has_patch:
             document = [op(cls, "test", "/rev", expected)]

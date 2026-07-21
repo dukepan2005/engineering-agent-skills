@@ -159,6 +159,16 @@ class AddLinkCommandTests(unittest.TestCase):
         self.assertEqual(out, {"mode": "unchanged", "id": self.ID})
         self.assertEqual(fake.applies, 0)
 
+    def test_different_organization_relation_with_same_id_is_not_treated_as_unchanged(self):
+        fake = self._seeded()
+        stored = self._relation_value()
+        stored["url"] = stored["url"].replace(f"{ORG}/", "https://dev.azure.com/other-org/")
+        fake.items[self.ID]["relations"] = [stored]
+        out = _run(add_link, fake, self._args(apply=True))
+        self.assertNotEqual(out, {"mode": "unchanged", "id": self.ID})
+        self.assertEqual(out, {"mode": "applied", "id": self.ID, "kind": self.KIND, "targetId": self.TARGET})
+        self.assertEqual(fake.applies, 1)
+
 
 class AddCommentCommandTests(unittest.TestCase):
     ID = 42
@@ -226,21 +236,13 @@ class ImplementationLifecycleTests(unittest.TestCase):
         self.assertEqual(len(fake.comments[self.ID]), 1)
 
     def test_close_task_unreconcilable_revision_prevents_patch_and_comment(self):
-        # A rev that did not move forward (here, ahead of the live rev) cannot be
-        # reconciled and must surface. A forward-moving rev is covered by CheckAc.
+        # Any rev mismatch — the expected rev no longer matches the live rev,
+        # whether behind or ahead — surfaces immediately; there is no retry.
         fake = self._seeded()
         with self.assertRaises(RuntimeError):
             _run(close_task, fake, self._close_args(apply=True, expected_rev=5))
         self.assertEqual(fake.applies, 0)
         self.assertEqual(fake.comments, {})
-
-    def test_close_task_reconciles_forward_rev_move(self):
-        # expected_rev lags the live rev (a commit auto-link bumped it); the patch
-        # auto-reconciles instead of forcing a manual re-preflight.
-        fake = self._seeded()  # rev 3
-        out = _run(close_task, fake, self._close_args(apply=True, expected_rev=2))
-        self.assertEqual(out["mode"], "applied")
-        self.assertEqual(fake.applies, 1)
 
     def test_close_task_comment_only_does_not_send_an_empty_work_item_patch(self):
         fake = self._seeded()
@@ -270,22 +272,69 @@ class CloseTaskCheckAcTests(unittest.TestCase):
     def _description(self, fake):
         return html.unescape(fake.read(self.ID)["fields"]["System.Description"])
 
-    def test_check_ac_all_toggles_every_line(self):
+    def test_check_ac_all_checks_incomplete_and_preserves_already_checked(self):
         fake = self._seeded()
         out = _run(close_task, fake, self._args(apply=True, check_ac="all"))
         self.assertEqual(out["mode"], "applied")
-        self.assertEqual(self._description(fake), "- [x] Write tests\n- [x] Ship it\n- [ ] Hold scope")
+        self.assertEqual(self._description(fake), "- [x] Write tests\n- [x] Ship it\n- [x] Hold scope")
 
-    def test_check_ac_fragment_toggles_only_matches_case_insensitively(self):
+    def test_check_ac_fragment_checks_single_match_case_insensitively(self):
         fake = self._seeded()
         _run(close_task, fake, self._args(apply=True, check_ac="WRITE"))
         self.assertEqual(self._description(fake), "- [x] Write tests\n- [ ] Ship it\n- [x] Hold scope")
+
+    def test_check_ac_all_is_idempotent_across_repeated_runs(self):
+        fake = self._seeded()
+        first = _run(close_task, fake, self._args(apply=True, check_ac="all", expected_rev=None))
+        self.assertEqual(first["mode"], "applied")
+        after_first = self._description(fake)
+        second = _run(close_task, fake, self._args(apply=True, check_ac="all", expected_rev=None))
+        self.assertEqual(second["mode"], "applied")
+        self.assertEqual(self._description(fake), after_first)
+
+    def test_check_ac_without_expected_rev_reuses_single_read_for_rev(self):
+        class CountingReads(FakeClient):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.read_calls = 0
+
+            def read(self, item_id):
+                self.read_calls += 1
+                return super().read(item_id)
+
+        fake = CountingReads.with_item(self.ID, rev=3)
+        fake.items[self.ID]["fields"].update({
+            "System.Title": "T", "System.State": "Active",
+            "System.Description": "- [ ] Write tests\n- [ ] Ship it\n- [x] Hold scope",
+        })
+        out = _run(close_task, fake, self._args(apply=True, check_ac="all", expected_rev=None))
+        self.assertEqual(out["mode"], "applied")
+        # One read fetches the Description (and its rev) for --check-ac; one
+        # read-back inside safe_mutate confirms the persisted result. No
+        # separate read solely to fetch a fresh rev — that would reintroduce a
+        # gap between two inconsistent reads (the Description from the first,
+        # the rev from the second) that a concurrent edit could land in.
+        self.assertEqual(fake.read_calls, 2)
+        self.assertEqual(self._description(fake), "- [x] Write tests\n- [x] Ship it\n- [x] Hold scope")
 
     def test_check_ac_no_match_raises_without_writing(self):
         fake = self._seeded()
         with self.assertRaises(RuntimeError) as cm:
             _run(close_task, fake, self._args(apply=True, check_ac="nonexistent"))
         self.assertIn("No acceptance criteria matched", str(cm.exception))
+        self.assertEqual(fake.applies, 0)
+        self.assertEqual(fake.comments, {})
+
+    def test_check_ac_ambiguous_fragment_raises(self):
+        fake = FakeClient.with_item(self.ID, rev=3)
+        fake.items[self.ID]["fields"].update({
+            "System.Title": "T", "System.State": "Active",
+            "System.Description": "- [ ] Write unit tests\n- [ ] Write integration tests\n- [x] Hold scope",
+        })
+        with self.assertRaises(RuntimeError) as cm:
+            _run(close_task, fake, self._args(apply=True, check_ac="write"))
+        self.assertIn("Write unit tests", str(cm.exception))
+        self.assertIn("Write integration tests", str(cm.exception))
         self.assertEqual(fake.applies, 0)
         self.assertEqual(fake.comments, {})
 

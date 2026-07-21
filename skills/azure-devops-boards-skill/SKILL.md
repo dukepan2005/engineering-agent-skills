@@ -73,10 +73,10 @@ sh "$HELPER" add-link \
 
 sh "$HELPER" close-task \
   --id 123 --expected-rev 8 --state Closed --comment-file /tmp/completion.md \
-  --check-ac all     # or --check-ac 'ships the contract' to toggle matching AC only
+  --check-ac all     # or --check-ac 'ships the contract' to check only the matching AC
 ```
 
-Add `--apply` after validation. `--check-ac` reads the live Description, toggles the matching markdown checkboxes (`all` or a case-insensitive fragment), and patches it back in the same mutation — use it instead of fetching and rewriting the whole Description. It is mutually exclusive with `--description-file`. For `predecessor`, `--target-id` blocks the current `--id`. For `parent`, the target is the current item's parent. Re-adding an existing relation returns `unchanged`.
+Add `--apply` after validation. `--check-ac` reads the live Description, checks the matching markdown checkboxes (`all` or a case-insensitive fragment) without unchecking any that are already checked, and patches it back in the same mutation — use it instead of fetching and rewriting the whole Description. It scans the entire Description for markdown checklist syntax, not a designated Acceptance Criteria heading or section; a fragment must uniquely match exactly one checklist item (ambiguous fragments raise), and `all` checks every item. It is mutually exclusive with `--description-file`. For `predecessor`, `--target-id` blocks the current `--id`. For `parent`, the target is the current item's parent. Re-adding an existing relation returns `unchanged`.
 
 ## Keep implementation synchronization compact
 
@@ -88,11 +88,12 @@ thread. Re-run only after an item, branch, or session change, or when a scope
 conflict appears.
 
 At closeout, run `close-task` once with `--apply`, passing the preflight `rev`
-as `--expected-rev` to avoid an extra pre-write read. If the rev advanced in the
-meantime (for example a commit's `Refs AB#123` auto-link bumped it), the helper
-detects the forward move, re-reads the live rev, and retries the mutation once —
-only an irreconcilable conflict (or a second consecutive rev change) surfaces.
-Toggle acceptance criteria with `--check-ac all|FRAGMENT` instead of fetching
+as `--expected-rev` to avoid an extra pre-write read. The JSON Patch's `/rev`
+test fails safely and surfaces immediately if the item changed since it was
+read (for example a commit's `Refs AB#123` auto-link bumped the rev, or someone
+else edited it) — the helper does not retry on your behalf; re-run
+`implement-preflight`, reconcile the changed scope, and retry manually.
+Check acceptance criteria with `--check-ac all|FRAGMENT` instead of fetching
 and rewriting the whole Description. `close-task` can update Description and
 state in one work-item mutation and post one Markdown completion comment; it
 verifies both persisted results, and the two Azure operations are not atomic.
