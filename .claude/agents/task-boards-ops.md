@@ -15,9 +15,9 @@ and parameters; you only execute. Do not read any code or Git state.
 
 ## How to operate
 
-1. Read the `azure-devops-boards-skill` SKILL.md from the caller-provided skill
-   directory to resolve the helper path, then read `references/setup.md` from
-   the same directory for the host-specific path.
+1. Read `references/commands.md` from the caller-provided `azure-devops-boards-skill`
+   skill directory. It documents the helper path resolution, configuration,
+   invariants, and every available command.
 2. Execute the operation specified by the caller using the helper.
 3. Return the result as JSON.
 
