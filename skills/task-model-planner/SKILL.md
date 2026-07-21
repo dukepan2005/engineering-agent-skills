@@ -21,11 +21,15 @@ tracker.
    when they materially affect a recommendation.
 5. Use the `task-boards-ops` agent (or spawn a cheap agent with
    `model=haiku`/`gpt-5.6-luna` and `reasoning_effort=low`) for all Azure Boards
-   reads. In the spawn instruction, tell the agent to read
-   `<repo-root>/skills/azure-devops-boards-skill/references/commands.md` to
-   resolve the helper, then run the requested read command (`show` or
-   `implement-preflight`). Do not load the full `azure-devops-boards-skill` into
-   the planner's context. Do not duplicate tracker mechanics.
+   reads. In the spawn instruction, resolve `<skill-dir>` to the absolute path
+   of the `azure-devops-boards-skill` directory:
+   - **Claude Code**: `${CLAUDE_SKILL_DIR}`, or `~/.claude/skills/azure-devops-boards-skill`.
+   - **Codex**: find `azure-devops-boards-skill/SKILL.md` in the Skills section
+     and drop the trailing `SKILL.md`.
+   Tell the agent to read `<skill-dir>/references/commands.md`, then run the
+   requested read command (`show` or `implement-preflight`). Do not load the
+   full `azure-devops-boards-skill` into the planner's context. Do not duplicate
+   tracker mechanics.
 6. Inspect current code or tests only when the ticket and its documents do not
    provide enough evidence to classify complexity. Label any conclusion based
    on incomplete evidence with lower confidence.

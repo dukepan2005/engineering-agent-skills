@@ -92,10 +92,14 @@ Spawn an agent with `model=gpt-5.6-luna` and `reasoning_effort=low`. On Codex,
 call `spawn_agent` with these parameters directly. On a host that supports
 named agent types, spawn the `task-boards-ops` agent instead.
 
-Give it the work-item ID, the repo root path, and the instruction:
+Give it the work-item ID and the instruction. Replace `<skill-dir>` with the
+resolved absolute path to the `azure-devops-boards-skill` directory:
+- **Claude Code**: `${CLAUDE_SKILL_DIR}`, or `~/.claude/skills/azure-devops-boards-skill`.
+- **Codex**: find `azure-devops-boards-skill/SKILL.md` in the Skills section and
+  drop the trailing `SKILL.md` to get the directory.
 
 ```text
-Read `<repo-root>/skills/azure-devops-boards-skill/references/commands.md` to resolve the helper path and learn the commands, then run `implement-preflight --id <id>`. Return the JSON output unchanged.
+Read `<skill-dir>/references/commands.md` to resolve the helper path and learn the commands, then run `implement-preflight --id <id>`. Return the JSON output unchanged.
 ```
 
 Collect the preflight result. If the spawn fails or the agent returns an error
@@ -159,10 +163,11 @@ Closeout policy (apply before spawning):
   a final state. If neither specifies one, leave the state unchanged.
 
 Give the agent the work-item ID, the preflight revision from step 1, the
-repo root path, the temporary comment file path, and the instruction:
+temporary comment file path, and the instruction (resolve `<skill-dir>` as in
+step 1):
 
 ```text
-Read `<repo-root>/skills/azure-devops-boards-skill/references/commands.md` to resolve the helper path, then run `close-task --apply --id <id> --expected-rev <rev> --check-ac <all|fragment> --comment-file <tmpfile> [--state <state>]`. Return the JSON output unchanged.
+Read `<skill-dir>/references/commands.md` to resolve the helper path, then run `close-task --apply --id <id> --expected-rev <rev> --check-ac <all|fragment> --comment-file <tmpfile> [--state <state>]`. Return the JSON output unchanged.
 ```
 
 Collect the closeout result. If the closeout fails because the expected rev is
