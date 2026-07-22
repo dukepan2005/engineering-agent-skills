@@ -44,10 +44,19 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertNotIn("<skill-dir>", text)
         self.assertNotIn("absolute path", text)
 
-    def test_implementation_uses_implement_by_skill_name(self) -> None:
+    def test_implementation_embeds_the_local_implement_flow_only(self) -> None:
         text = self.read_skill("azure-task-implement")
 
-        self.assertIn("**REQUIRED SUB-SKILL:** Use `$implement`.", text)
+        self.assertIn("Implement the work described by the provided scope.", text)
+        self.assertIn("Use `$tdd` where possible, at pre-agreed seams.", text)
+        self.assertIn("Run typechecking regularly, single test files regularly,", text)
+        self.assertIn("Once done, use `$code-review` to review the work.", text)
+        self.assertIn("Commit your work to the current branch.", text)
+        self.assertNotIn("`$implement`", text)
+        self.assertNotIn("orchestrator", text.lower())
+        self.assertNotIn("preflight", text.lower())
+        self.assertNotIn("closeout", text.lower())
+        self.assertNotIn("working-tree review mode", text)
         self.assertNotIn("skills/azure-task-implement/references", text)
 
     def test_boards_role_is_semantic_on_codex(self) -> None:

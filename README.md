@@ -9,24 +9,17 @@ its own triggering and runtime instructions.
 | Skill / Agent | Purpose |
 |---|---|
 | [`azure-devops-boards-skill`](skills/azure-devops-boards-skill/) | Safely read and mutate Azure DevOps Boards work items through the locally authenticated Azure CLI. |
-| [`azure-task-implement`](skills/azure-task-implement/) | Implement code for one Azure Boards work item, using the preflight scope from the orchestrator. |
+| [`azure-task-implement`](skills/azure-task-implement/) | Implement code from a provided specification or ticket scope. |
 | `task-boards-ops` | Semantic role for a cheap Boards-only child (Haiku or gpt-5.6-luna, low reasoning). Claude Code may optionally provide the [named agent](.claude/agents/task-boards-ops.md). |
 | [`task-model-planner`](skills/task-model-planner/) | Recommend one named, lowest-reliable execution profile for each work item. |
 | [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver implementation-ready Azure Boards work items from a Story or an explicit item set: preflight via cheap agent, implement via named-profile agent, closeout via cheap agent. |
 
-## Third-Party Dependency
+## Review Dependency
 
-`azure-task-implement` and the orchestrator both wrap the third-party
-`$implement` workflow. Installing this repository does **not** install Skills
-from [`mattpocock/skills`](https://github.com/mattpocock/skills). Before using
-either, install its required `$implement` Skill separately for the same agent
-host; `$tdd` is recommended because `$implement` uses it when appropriate.
-
-For Codex, for example:
-
-```bash
-npx skills@latest add mattpocock/skills
-```
+`azure-task-implement` embeds the local workflow from Matt Pocock's
+`$implement` Skill. It does not require that Skill to be model-invocable. The
+embedded workflow uses `$code-review` before committing, so the host must make
+that Skill available in the same catalog.
 
 The orchestrator also requires this repository's `$task-model-planner`,
 `$azure-task-implement`, and `$azure-devops-boards-skill`. It invokes
@@ -94,30 +87,27 @@ $azure-task-orchestrator AB#168
 It runs three sequential subagents per work item:
 1. **Preflight** (cheap model, low reasoning) — reads the Azure Boards work item
    and returns a structured scope snapshot.
-2. **Implement** (planner-specified model) — delegates to the `$implement`
-   workflow for code, tests, and commit.
+2. **Implement** (planner-specified model) — follows `$azure-task-implement`'s
+   direct code, test, review, and commit workflow.
 3. **Closeout** (cheap model, low reasoning) — posts the completion comment and
    closes the work item with optimistic revision checking.
 
-Use `$azure-task-implement` directly only in a worker that has already received
-the orchestrator's preflight scope and needs just the code implementation step.
-It must not be invoked with only an Azure work-item ID: the implementation Skill
-does not read Azure Boards and therefore cannot obtain that scope itself.
+Use `$azure-task-implement` whenever a specification or ticket scope is already
+available and only local implementation work is required. In the three-stage
+Azure delivery flow, the orchestrator supplies that scope to its implementation
+worker.
 
 #### Dependencies
 
-These wrappers do not bundle or install third-party Skills.
+These wrappers do not bundle or install their review dependency.
 
-- `$azure-task-implement` requires only `$implement` from
-  [`mattpocock/skills`](https://github.com/mattpocock/skills).
+- `$azure-task-implement` requires `$code-review` from the same host Skill
+  catalog. It does not require `$implement`.
 - `$azure-task-orchestrator` requires `$task-model-planner`,
-  `$azure-task-implement`, and `$azure-devops-boards-skill`; the implementation
-  Skill in turn requires `$implement`.
+  `$azure-task-implement`, and `$azure-devops-boards-skill`.
 
-The orchestrator checks all dependencies before reading or changing a work item
-and stops with the relevant install command if one is unavailable. `$tdd` from
-`mattpocock/skills` is recommended, because `$implement` uses it where
-appropriate.
+The orchestrator checks its direct dependencies before reading or changing a
+work item and stops when one is unavailable.
 
 ### Task model planning
 
@@ -149,8 +139,8 @@ explicit user confirmation before dispatching, and stops the sequence on the
 first unsuccessful worker. It never substitutes the parent model or runs work
 items in parallel.
 
-`$implement` is supplied by the agent host or your own installed implementation
-workflow. All dependencies are invoked by Skill name. The semantic
+`$azure-task-implement` supplies its own implementation workflow and invokes
+`$code-review` by Skill name before commit. The semantic
 `task-boards-ops` role isolates Boards mechanics; the planning Skill never edits
 code, Git state, or Azure Boards.
 
