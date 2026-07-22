@@ -11,27 +11,29 @@ cannot run Azure Boards operations from here. The commands live in
 [references/commands.md](references/commands.md), which only the dedicated
 agent reads.
 
-## Delegate every operation to the task-boards-ops agent
+## Delegate every operation to a Boards child
 
-Your first action on any Azure Boards request is to spawn the `task-boards-ops`
-agent (`model=haiku`/`gpt-5.6-luna`, low reasoning). The spawn instruction must
-be **self-contained** — it cannot assume the agent has any preloaded definition.
-Tell the agent to read `<skill-dir>/references/commands.md` to resolve the
-helper, then run the specific command (e.g. `create --type Bug ...`,
-`show --id 42`, `close-task --apply ...`) with its parameters. The agent
-returns structured JSON.
+Your first action on an Azure Boards request is to spawn one isolated child and
+assign it the semantic `task-boards-ops` role. On Codex, use
+`model=gpt-5.6-luna` and `reasoning_effort=low`. On Claude Code, use Haiku with
+low reasoning. A host may use a named `task-boards-ops` agent when available,
+but named-agent configuration is not required.
 
-On Codex, spawn with `model=gpt-5.6-luna` and `reasoning_effort=low` via
-`spawn_agent`. On hosts with named agent types, spawn `task-boards-ops` by name
-(its definition already points at commands.md, but include the read step in the
-instruction anyway, so the same instruction works on every host).
+The spawn instruction must be self-contained. Tell the child to use
+`$azure-devops-boards-skill` in the semantic role and name the exact operation
+and parameters. The child returns structured JSON.
+
+When the current prompt already assigns the semantic `task-boards-ops` role,
+do not spawn another child. Read [references/commands.md](references/commands.md)
+to resolve the helper, run only the requested Boards operation, and return its
+structured output.
 
 Do not run any helper command yourself. Do not read `references/commands.md`
 into this context. Do not search for duplicate work items before creating one.
 
 ## Fallback (agent spawning unavailable)
 
-Only if the host cannot spawn the `task-boards-ops` agent, read
+Only if the host cannot spawn a Boards child, read
 [references/commands.md](references/commands.md) and execute the operation
 directly with the `Bash(sh *)` tool. This path is more expensive and should be
 rare.

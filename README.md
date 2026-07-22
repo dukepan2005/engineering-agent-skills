@@ -10,7 +10,7 @@ its own triggering and runtime instructions.
 |---|---|
 | [`azure-devops-boards-skill`](skills/azure-devops-boards-skill/) | Safely read and mutate Azure DevOps Boards work items through the locally authenticated Azure CLI. |
 | [`azure-task-implement`](skills/azure-task-implement/) | Implement code for one Azure Boards work item, using the preflight scope from the orchestrator. |
-| [`task-boards-ops`](.claude/agents/task-boards-ops.md) | Cheap agent (haiku, low reasoning) for all Azure Boards operations (show, preflight, create, update, close-task, add-comment, add-link, current-sprint). On Codex, use gpt-5.6-luna via spawn_agent. |
+| `task-boards-ops` | Semantic role for a cheap Boards-only child (Haiku or gpt-5.6-luna, low reasoning). Claude Code may optionally provide the [named agent](.claude/agents/task-boards-ops.md). |
 | [`task-model-planner`](skills/task-model-planner/) | Recommend one named, lowest-reliable execution profile for each work item. |
 | [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver implementation-ready Azure Boards work items from a Story or an explicit item set: preflight via cheap agent, implement via named-profile agent, closeout via cheap agent. |
 
@@ -28,10 +28,10 @@ For Codex, for example:
 npx skills@latest add mattpocock/skills
 ```
 
-The orchestrator also requires this repository's `$azure-devops-boards-skill`
-and the `task-boards-ops` agent. It checks every dependency before it begins a
-work item, stops and reports a missing dependency, and never installs one
-automatically.
+The orchestrator also requires this repository's `$task-model-planner`,
+`$azure-task-implement`, and `$azure-devops-boards-skill`. It invokes
+dependencies by Skill name, stops when the host reports one unavailable, and
+never requires users to supply installation paths or paste Skill bodies.
 
 `$azure-devops-boards-skill` also requires a locally authenticated Azure CLI
 with the Azure DevOps extension:
@@ -84,8 +84,8 @@ The orchestrator handles the full lifecycle of implementation-ready Azure
 Boards work items. It accepts either a Story, whose directly related child items
 it plans and delivers in dependency order, or an explicit item set, including a
 single Task or Bug. It delegates Azure Boards mechanical operations (preflight,
-closeout) to a cheap `task-boards-ops` agent and code implementation to a
-planner-specified agent:
+closeout) to a cheap child in the semantic `task-boards-ops` role and code
+implementation to a planner-specified agent:
 
 ```text
 $azure-task-orchestrator AB#168
@@ -96,8 +96,8 @@ It runs three sequential subagents per work item:
    and returns a structured scope snapshot.
 2. **Implement** (planner-specified model) — delegates to the `$implement`
    workflow for code, tests, and commit.
-3. **Closeout** (cheap model, low reasoning) — checks off acceptance criteria,
-   posts a completion comment, and closes the work item.
+3. **Closeout** (cheap model, low reasoning) — posts the completion comment and
+   closes the work item with optimistic revision checking.
 
 Use `$azure-task-implement` directly only in a worker that has already received
 the orchestrator's preflight scope and needs just the code implementation step.
@@ -110,8 +110,9 @@ These wrappers do not bundle or install third-party Skills.
 
 - `$azure-task-implement` requires only `$implement` from
   [`mattpocock/skills`](https://github.com/mattpocock/skills).
-- `$azure-task-orchestrator` requires `$implement`, this repository's
-  `$azure-devops-boards-skill`, and the `task-boards-ops` agent.
+- `$azure-task-orchestrator` requires `$task-model-planner`,
+  `$azure-task-implement`, and `$azure-devops-boards-skill`; the implementation
+  Skill in turn requires `$implement`.
 
 The orchestrator checks all dependencies before reading or changing a work item
 and stops with the relevant install command if one is unavailable. `$tdd` from
@@ -149,9 +150,9 @@ first unsuccessful worker. It never substitutes the parent model or runs work
 items in parallel.
 
 `$implement` is supplied by the agent host or your own installed implementation
-workflow. The orchestrator requires it plus `$azure-devops-boards-skill` and
-`task-boards-ops`; the planning Skill never edits code, Git state, or Azure
-Boards.
+workflow. All dependencies are invoked by Skill name. The semantic
+`task-boards-ops` role isolates Boards mechanics; the planning Skill never edits
+code, Git state, or Azure Boards.
 
 ## Development
 

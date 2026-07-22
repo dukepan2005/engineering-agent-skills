@@ -9,44 +9,34 @@ Create one read-only execution-profile plan, validate it, obtain the user's
 confirmation, then run exactly one Azure work-item delivery worker at a time.
 Do not implement, review, or close work items in the orchestrator itself.
 
-## Require Direct Skills Before Work
+## Require Skills and Spawn Control Before Work
 
-Before reading tracker data or spawning a worker, use the `task-model-planner`,
-`azure-task-implement`, and `task-boards-ops` agents, plus a subagent spawn
-primitive that accepts an explicit model and reasoning effort. The
-`task-boards-ops` agent has a fixed model in its definition; spawn it by name
-without a model override. It covers all Azure Boards reads and mutations
-(show, preflight, create, update, close-task, add-comment, add-link,
-current-sprint).
+**REQUIRED SKILLS:** Use `$task-model-planner`, `$azure-task-implement`, and
+`$azure-devops-boards-skill`.
 
-For each Skill, accept one of these ways to obtain its instructions:
+Invoke each dependency by Skill name and let the host resolve its enabled Skill
+catalog. Do not require the user to provide an installation path or paste a
+Skill body. If the host reports a required Skill as unavailable, stop before
+reading tracker data, code, or Git state and report that missing Skill.
 
-- **Slash command:** the host exposes the corresponding enabled Skill.
-- **Context:** the current conversation supplies its complete `<skill>` body.
-- **Path:** the current conversation or host catalog supplies an absolute,
-  readable `SKILL.md` path. Read that file completely before using it.
-
-When a Skill is supplied by Context or Path, follow the `task-model-planner` or
-`azure-task-implement` skill instructions directly without adding a host-specific
-invocation tool. Record how each Skill was supplied. Do not infer a path from a
-Skill name or treat an installed directory that is neither advertised nor
-supplied as available.
+Also require a subagent spawn primitive that accepts an explicit model and
+reasoning effort. Boards children use the semantic `task-boards-ops` role
+defined by `$azure-devops-boards-skill`; no named-agent configuration is
+required.
 
 On Codex, use `spawn_agent` with `model` and `reasoning_effort`. On another
 host, use its equivalent only when it can set both values for each child. Stop
 without reading or changing code, Git state, or Azure Boards if no usable
-source or spawn primitive is available. State what is missing; do not silently
-run the work item in the parent agent or fall back to the parent's profile.
+spawn primitive is available. Do not silently run the work item in the parent
+agent or fall back to the parent's profile.
 
 ## Build and Validate the Plan
 
-1. Use the `task-model-planner` skill for the Story or explicit work-item set.
-   When it is supplied by Context or Path, first read its complete supplied body
-   or `SKILL.md`, then follow it directly. Treat its report as read-only planning
-   guidance, not tracker authority.
-2. Read the `task-model-planner` skill's canonical
-   `references/execution-profiles.md` registry. Resolve every profile ID from
-   that one registry; do not reproduce or override its mapping here.
+1. Use `$task-model-planner` for the Story or explicit work-item set. Treat its
+   report as read-only planning guidance, not tracker authority.
+2. Read `$task-model-planner`'s canonical execution-profile registry. Resolve
+   every profile ID from that one registry; do not reproduce or override its
+   mapping here.
 3. Do not omit or reject a target solely because its Azure type is not Task,
    and do not require a type conversion before planning or delivery.
 4. Require a recommendation row and an execution-plan entry for every target
@@ -88,18 +78,13 @@ one is complete.
 
 ### 1. Preflight — spawn cheap agent
 
-Spawn an agent with `model=gpt-5.6-luna` and `reasoning_effort=low`. On Codex,
-call `spawn_agent` with these parameters directly. On a host that supports
-named agent types, spawn the `task-boards-ops` agent instead.
-
-Give it the work-item ID and the instruction. Replace `<skill-dir>` with the
-resolved absolute path to the `azure-devops-boards-skill` directory:
-- **Claude Code**: `${CLAUDE_SKILL_DIR}`, or `~/.claude/skills/azure-devops-boards-skill`.
-- **Codex**: find `azure-devops-boards-skill/SKILL.md` in the Skills section and
-  drop the trailing `SKILL.md` to get the directory.
+Spawn an agent with `model=gpt-5.6-luna` and `reasoning_effort=low`. Give it the
+work-item ID and this self-contained instruction:
 
 ```text
-Read `<skill-dir>/references/commands.md` to resolve the helper path and learn the commands, then run `implement-preflight --id <id>`. Return the JSON output unchanged.
+Use `$azure-devops-boards-skill` in its semantic `task-boards-ops` role. Run
+`implement-preflight --id <id>` and return the JSON output unchanged. Do not
+perform any non-Boards work.
 ```
 
 Collect the preflight result. If the spawn fails or the agent returns an error
@@ -124,25 +109,23 @@ retry fails, stop the sequence. Do not retry after a worker begins, across
 models, or for a work-item-level failure.
 
 Give the worker its work-item ID and type, planned profile ID, effective
-profile ID, relevant planner evidence and order reason, the resolved
-`azure-task-implement` skill source, the preflight scope from step 1, plus
-this instruction:
+profile ID, relevant planner evidence and order reason, and the preflight scope
+from step 1, plus this instruction:
 
 ```text
-Use the `azure-task-implement` skill to implement work item <id> in the current
-workspace and branch. The preflight scope is provided below. Read the resolved
-SKILL.md before acting. Re-read repository authority; the planner is not a
-substitute for repo guidance. The effective execution profile is fixed for this
-worker. Do not perform Azure Boards operations.
+Use `$azure-task-implement` to implement work item <id> in the current workspace
+and branch. The preflight scope is provided below. Re-read repository authority;
+the planner is not a substitute for repo guidance. The effective execution
+profile is fixed for this worker. Do not perform Azure Boards operations.
 
 Return the compact delivery summary with commit hash, changed areas,
-verification evidence, remaining work, and a filled closeout comment based on
-the template at <repo-root>/skills/azure-task-implement/references/closeout-comment.md.
+verification evidence, remaining work, and the filled closeout comment required
+by `$azure-task-implement`.
 
 <preflight scope JSON>
 ```
 
-Let the `azure-task-implement` skill own that work item's implementation,
+Let `$azure-task-implement` own that work item's implementation,
 verification, review, and commit. Do not duplicate any of those operations in
 the parent. Require the worker to finish before inspecting its result. Keep the
 shared workspace untouched while a worker runs. On failure, incomplete
@@ -151,9 +134,7 @@ immediately. Do not dispatch later work items.
 
 ### 3. Closeout — spawn cheap agent
 
-Spawn an agent with `model=gpt-5.6-luna` and `reasoning_effort=low` (same as
-step 1: Codex uses `spawn_agent` directly; hosts with named agent types use
-`task-boards-ops`).
+Spawn an agent with `model=gpt-5.6-luna` and `reasoning_effort=low`.
 
 Closeout policy (apply before spawning):
 - Write the closeout comment returned by step 2 into a temporary Markdown file.
@@ -167,11 +148,13 @@ Closeout policy (apply before spawning):
   optimistic-lock test and it is what keeps close from re-reading the item.
 
 Give the agent the work-item ID, the preflight revision from step 1, the
-temporary comment file path, and the instruction (resolve `<skill-dir>` as in
-step 1):
+temporary comment file path, and this self-contained instruction:
 
 ```text
-Read `<skill-dir>/references/commands.md` to resolve the helper path, then run `close-task --apply --id <id> --expected-rev <rev> --state Closed --comment-file <tmpfile>`. Return the JSON output unchanged. Do not add `--check-ac` or `--description-file`.
+Use `$azure-devops-boards-skill` in its semantic `task-boards-ops` role. Run
+`close-task --apply --id <id> --expected-rev <rev> --state Closed
+--comment-file <tmpfile>` and return the JSON output unchanged. Do not add
+`--check-ac` or `--description-file`, and do not perform any non-Boards work.
 ```
 
 Collect the closeout result. If the closeout fails because the expected rev is
@@ -184,9 +167,9 @@ Dispatch the next work item only after all three steps complete successfully.
 
 ## Report
 
-Return one ordered summary with how the planning and delivery Skills were
-supplied. For every completed work item, include the planned and effective
-execution profile IDs, any pre-start capacity fallback error, worker-reported
-commit and verification, final tracker state, and closeout result. For a stopped
-run, identify the work item that stopped the sequence, retain earlier completed
-results, and state that later work items were not dispatched.
+Return one ordered summary. For every completed work item, include the planned
+and effective execution profile IDs, any pre-start capacity fallback error,
+worker-reported commit and verification, final tracker state, and closeout
+result. For a stopped run, identify the work item that stopped the sequence,
+retain earlier completed results, and state that later work items were not
+dispatched.
