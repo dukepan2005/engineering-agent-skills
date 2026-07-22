@@ -119,8 +119,9 @@ the planner is not a substitute for repo guidance. The effective execution
 profile is fixed for this worker. Do not perform Azure Boards operations.
 
 Return the compact delivery summary with commit hash, changed areas,
-verification evidence, remaining work, and the filled closeout comment required
-by `$azure-task-implement`.
+verification evidence, remaining work, and an acceptance-evidence table. Map
+each supplied acceptance criterion to concrete verification evidence, or state
+that it was not verified. Do not perform Azure Boards operations or closeout.
 
 <preflight scope JSON>
 ```
@@ -137,24 +138,39 @@ immediately. Do not dispatch later work items.
 Spawn an agent with `model=gpt-5.6-luna` and `reasoning_effort=low`.
 
 Closeout policy (apply before spawning):
-- Write the closeout comment returned by step 2 into a temporary Markdown file.
+- Read the current full Description and preserve its non-checklist content and
+  formatting. Mark an unchecked Markdown checklist item as checked only when
+  the implementation summary provides explicit implementation evidence for
+  that criterion. Do not infer evidence from the item's final state, commit
+  title, or a general success claim.
+- If an unchecked checklist item lacks explicit evidence, or its text cannot
+  be mapped unambiguously to the acceptance-evidence table, stop without
+  closing the item. Do not overwrite the Description or post a completion
+  comment.
+- Write the resulting Description to a temporary Markdown file and write a
+  completion comment from the implementation summary to another temporary
+  Markdown file.
 - Close the work item to `Closed`: pass `--state Closed`. If repository guidance
   names a different terminal state for a non-Task type, use that stated value.
-- Set state and post the comment only. Do not read or mutate the Description on
-  close — never pass `--check-ac` or `--description-file`. Both trigger a read
-  and a Description rewrite; acceptance-criteria status belongs in the comment,
-  not the work-item Description.
-- Always pass `--expected-rev` (the preflight revision from step 1). It is the
-  optimistic-lock test and it is what keeps close from re-reading the item.
+- Pass the rewritten Description with `--description-file`; do not combine it
+  with `--check-ac` because those options are mutually exclusive.
+- Always pass `--expected-rev` (the preflight revision from step 1). It binds
+  the Description read and final mutation to the same work-item version; a
+  stale revision stops the closeout.
 
 Give the agent the work-item ID, the preflight revision from step 1, the
-temporary comment file path, and this self-contained instruction:
+implementation delivery summary, and this self-contained instruction:
 
 ```text
-Use `$azure-devops-boards-skill` in its semantic `task-boards-ops` role. Run
-`close-task --apply --id <id> --expected-rev <rev> --state Closed
---comment-file <tmpfile>` and return the JSON output unchanged. Do not add
-`--check-ac` or `--description-file`, and do not perform any non-Boards work.
+Use `$azure-devops-boards-skill` in its semantic `task-boards-ops` role. Read
+the current full Description with `show --full --id <id>`. Apply only the
+evidence-backed Markdown checklist changes specified by the implementation
+summary, preserving all other Description content. Write the rewritten
+Description to `<tmpdescription>` and a Markdown completion comment to
+`<tmpcomment>`. Then run `close-task --apply --id <id> --expected-rev <rev>
+--state Closed --description-file <tmpdescription> --comment-file <tmpcomment>`.
+Return the JSON output unchanged. Do not use `--check-ac`, and do not perform
+any non-Boards work.
 ```
 
 Collect the closeout result. If the closeout fails because the expected rev is

@@ -22,7 +22,12 @@ Read the repository's tracker instructions before operating. Treat its work-item
 - Read the relevant work item before changing it.
 - Do not search for duplicate work items before creating one. Create directly — the caller knows what it intends to create, and pre-creation duplicate queries cost more than the occasional duplicate they would prevent. Only search for existing items when the user explicitly asks to check.
 - Prepare long descriptions and comments in temporary Markdown files.
-- On close, set the terminal state and post the completion comment only. Do not read or rewrite the Description: never pass `--check-ac` or `--description-file` to `close-task`. The helper still offers `--check-ac` as an opt-in that reads the live Description and checks matching checkboxes, but the close flow does not use it — acceptance-criteria status goes in the comment, not the Description.
+- When closeout needs acceptance-criteria synchronization, read the full
+  Description, preserve all non-checklist content, mark only checklist items
+  backed by explicit implementation evidence, and pass the result with
+  `close-task --description-file`. Post the completion comment in the same
+  closeout call. `--check-ac` is an opt-in server-side alternative and is
+  mutually exclusive with `--description-file`.
 - Run a mutation once with `--apply` by default — the helper validates server-side, applies, and read-back-checks the persisted result in a single call. Use the opt-in two-phase form (the identical command without `--apply`, reviewed, then repeated with `--apply`) only for high-risk changes or when a human should review before the write.
 - A stale `/rev` — the item changed since it was read — fails the mutation immediately, with no automatic retry. Re-read and reconcile before retrying.
 - `az boards work-item update --discussion` is off-limits: it posts plain text, not a native relation. Express dependencies with `add-link` instead.
@@ -50,10 +55,18 @@ sh "$HELPER" add-link \
   --id 124 --kind predecessor --target-id 123
 
 sh "$HELPER" close-task \
-  --id 123 --expected-rev 8 --state Closed --comment-file /tmp/completion.md
+  --id 123 --expected-rev 8 --state Closed \
+  --description-file /tmp/description.md --comment-file /tmp/completion.md
 ```
 
-Add `--apply` after validation. `--check-ac` is an opt-in flag, not used by the close flow: it reads the live Description, checks the matching markdown checkboxes (`all`, or a case-insensitive fragment that must uniquely match exactly one item — ambiguous fragments raise) without unchecking any that are already checked, and patches it back in the same mutation; it scans the whole Description, not a designated Acceptance Criteria section, and is mutually exclusive with `--description-file`. For `predecessor`, `--target-id` blocks the current `--id`. For `parent`, the target is the current item's parent. Re-adding an existing relation returns `unchanged`.
+Add `--apply` after validation. Before using `--description-file`, keep all
+Description content other than the evidence-backed Markdown checklist markers
+unchanged. `--check-ac` reads the live Description, checks matching markdown
+checkboxes (`all`, or a case-insensitive fragment that must uniquely match
+exactly one item — ambiguous fragments raise), and patches it back in the same
+mutation; it is mutually exclusive with `--description-file`. For
+`predecessor`, `--target-id` blocks the current `--id`. For `parent`, the target
+is the current item's parent. Re-adding an existing relation returns `unchanged`.
 
 ## Keep implementation synchronization compact
 
@@ -66,9 +79,8 @@ conflict appears.
 
 At closeout, run `close-task` once with `--apply`, passing the preflight `rev`
 as `--expected-rev` — the invariants above apply unchanged (one call, fail-fast
-on a stale rev, no retry). `close-task` sets the terminal state and posts one
-Markdown completion comment in a single call; it does not read or rewrite the
-Description. It verifies both persisted results, and the two Azure operations
-are not atomic.
+on a stale rev, no retry). It persists the evidence-backed Description rewrite,
+terminal state, and one Markdown completion comment; it verifies both persisted
+results, and the two Azure operations are not atomic.
 
 Read [azure-boards-api.md](azure-boards-api.md) only when endpoint behavior or relation semantics need investigation.

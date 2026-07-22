@@ -59,6 +59,15 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertNotIn("working-tree review mode", text)
         self.assertNotIn("skills/azure-task-implement/references", text)
 
+    def test_closeout_rewrites_evidence_backed_checklists_and_posts_comment(self) -> None:
+        text = self.read_skill("azure-task-orchestrator")
+
+        self.assertIn("Read the current full Description", text)
+        self.assertIn("explicit implementation evidence", text)
+        self.assertIn("--description-file <tmpdescription>", text)
+        self.assertIn("--comment-file <tmpcomment>", text)
+        self.assertNotIn("never pass `--check-ac` or `--description-file`", text)
+
     def test_boards_role_is_semantic_on_codex(self) -> None:
         text = self.read_skill("azure-devops-boards-skill")
 
