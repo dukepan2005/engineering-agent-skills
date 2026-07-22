@@ -12,7 +12,7 @@ its own triggering and runtime instructions.
 | [`azure-task-implement`](skills/azure-task-implement/) | Implement code for one Azure Boards work item, using the preflight scope from the orchestrator. |
 | [`task-boards-ops`](.claude/agents/task-boards-ops.md) | Cheap agent (haiku, low reasoning) for all Azure Boards operations (show, preflight, create, update, close-task, add-comment, add-link, current-sprint). On Codex, use gpt-5.6-luna via spawn_agent. |
 | [`task-model-planner`](skills/task-model-planner/) | Recommend one named, lowest-reliable execution profile for each work item. |
-| [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver a Story's work items: preflight via cheap agent, implement via named-profile agent, closeout via cheap agent. |
+| [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver implementation-ready Azure Boards work items from a Story or an explicit item set: preflight via cheap agent, implement via named-profile agent, closeout via cheap agent. |
 
 ## Third-Party Dependency
 
@@ -80,9 +80,12 @@ and command examples.
 
 ### Azure Task delivery
 
-The orchestrator handles the full lifecycle of a work item, delegating Azure
-Boards mechanical operations (preflight, closeout) to a cheap `task-boards-ops`
-agent and code implementation to a planner-specified agent:
+The orchestrator handles the full lifecycle of implementation-ready Azure
+Boards work items. It accepts either a Story, whose directly related child items
+it plans and delivers in dependency order, or an explicit item set, including a
+single Task or Bug. It delegates Azure Boards mechanical operations (preflight,
+closeout) to a cheap `task-boards-ops` agent and code implementation to a
+planner-specified agent:
 
 ```text
 $azure-task-orchestrator AB#168
@@ -96,12 +99,10 @@ It runs three sequential subagents per work item:
 3. **Closeout** (cheap model, low reasoning) — checks off acceptance criteria,
    posts a completion comment, and closes the work item.
 
-Use `$azure-task-implement` directly only when the orchestrator has already
-performed preflight and you need just the code implementation step:
-
-```text
-$azure-task-implement AB#169
-```
+Use `$azure-task-implement` directly only in a worker that has already received
+the orchestrator's preflight scope and needs just the code implementation step.
+It must not be invoked with only an Azure work-item ID: the implementation Skill
+does not read Azure Boards and therefore cannot obtain that scope itself.
 
 #### Dependencies
 
@@ -119,10 +120,11 @@ appropriate.
 
 ### Task model planning
 
-Invoke the Skill to plan a Story or a set of tickets:
+Invoke the Skill to plan a Story or an explicit work-item set, including a
+single Task or Bug:
 
 ```text
-$task-model-planner AB#167
+$task-model-planner <Story-or-explicit-work-item-set>
 ```
 
 It returns one cost-aware execution-profile ID per work item, plus evidence,
@@ -134,8 +136,8 @@ single mapping from profile ID to model and reasoning effort.
 Always use the orchestrator for full lifecycle delivery:
 
 ```text
-$task-model-planner <Story>
-$azure-task-orchestrator <Story>
+$task-model-planner <Story-or-explicit-work-item-set>
+$azure-task-orchestrator <Story-or-explicit-work-item-set>
 ```
 
 The orchestrator resolves each profile ID through `$task-model-planner`'s
