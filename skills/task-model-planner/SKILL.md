@@ -19,8 +19,12 @@ tracker.
    explicit work-item set, analyze only the named items.
 4. Read blocking, prerequisite, replacement, or cross-repository tickets only
    when they materially affect a recommendation.
-5. Use the existing Azure Boards skill and repository tracker guidance for
-   Azure Boards reads. Do not duplicate tracker mechanics.
+5. Use `$azure-devops-boards-skill` for every Azure Boards read. On Codex,
+   spawn a child with `model=gpt-5.6-luna` and `reasoning_effort=low`; on Claude
+   Code, use Haiku with low reasoning. Assign the child the semantic
+   `task-boards-ops` role and tell it to run the required `show` or
+   `implement-preflight` operation. Do not duplicate tracker mechanics in the
+   planner.
 6. Inspect current code or tests only when the ticket and its documents do not
    provide enough evidence to classify complexity. Label any conclusion based
    on incomplete evidence with lower confidence.

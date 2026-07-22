@@ -107,8 +107,29 @@ def assert_description(item, text):
     if html.unescape(stored) != text or item.get("multilineFieldsFormat", {}).get("System.Description") != "markdown": raise RuntimeError("Description or Markdown metadata did not persist.")
 
 
+def _relation_identity(url):
+    """Return ``(org_prefix, work_item_id)`` for an Azure work-item relation URL,
+    ignoring only the project segment (name vs GUID varies) — organization/host
+    and the API shape must still match. ``None`` if the URL isn't shaped like a
+    work-item API URL."""
+    base, sep, rest = url.partition("/_apis/wit/workItems/")
+    if not sep:
+        return None
+    target = rest.split("?", 1)[0].rstrip("/")
+    if not target.isdigit():
+        return None
+    return base.rsplit("/", 1)[0], int(target)
+
+
 def _has_relation(item, rel, url):
-    return any(r.get("rel") == rel and r.get("url") == url for r in item.get("relations", []))
+    expected_identity = _relation_identity(url)
+    return any(
+        stored.get("rel") == rel and (
+            stored.get("url") == url if expected_identity is None
+            else _relation_identity(stored.get("url", "")) == expected_identity
+        )
+        for stored in item.get("relations", [])
+    )
 
 
 def _relation_summary(item):
@@ -150,6 +171,17 @@ def preflight(args):
           "relations": _relation_summary(item)})
 
 
+def show_item(args):
+    """Emit a work item. Default is compact (id/rev/type/state/title/relations);
+    pass ``--full`` for the raw Azure JSON."""
+    item = connect(args)[0].read(args.id)
+    if args.full: return emit(item)
+    fields = item.get("fields", {})
+    emit({"id": item.get("id", args.id), "rev": item.get("rev"),
+          "type": fields.get("System.WorkItemType"), "state": fields.get("System.State"),
+          "title": fields.get("System.Title"), "relations": _relation_summary(item)})
+
+
 def _evaluate(item, expectation, phase, *, check_relation=True):
     if expectation.description is not None: assert_description(item, expectation.description)
     fields = item.get("fields", {})
@@ -168,15 +200,15 @@ def _evaluate(item, expectation, phase, *, check_relation=True):
 
 
 def safe_mutate(*, client, target, document, expectation, apply):
-    """The safe-mutation lifecycle: validate-only → check → apply → read-back → check.
+    """The safe-mutation lifecycle: validate → check → apply → read-back → check.
 
     Returns ``{mode, id?, rev?}``; never prints. Fields and descriptions are checked
     against the validated item. Existing-item relations are checked against
-    persisted read-back because Azure update validation can omit them.
+    persisted read-back because Azure update validation can omit them. A stale
+    ``/rev`` test (the item changed since it was read) surfaces immediately —
+    the caller must re-read and reconcile before retrying.
     """
     checked = client.validate(document, target)
-    # Azure update validateOnly responses can omit relations even when the JSON
-    # Patch is accepted. Relation presence is therefore a persisted-state check.
     _evaluate(checked, expectation, "Validation",
               check_relation=not isinstance(target, ExistingItem))
     if not apply: return {"mode": "validated"}
@@ -231,21 +263,67 @@ def add_comment(args):
     emit({"mode": "applied", "id": args.id, "commentId": saved.get("id")})
 
 
+def _checklist_marker(body):
+    """Return ``(marker, checked)`` for a markdown checklist line, else ``(None, False)``."""
+    for marker in ("- [x]", "- [X]"):
+        if body.startswith(marker): return marker, True
+    if body.startswith("- [ ]"): return "- [ ]", False
+    return None, False
+
+
+def _check_checkboxes(description, selector):
+    """Return ``description`` with matching markdown checklist lines marked checked.
+
+    ``selector.casefold() == "all"`` matches every checklist line; otherwise
+    exactly one line whose item text (case-insensitive) contains ``selector``
+    must match — ambiguous or missing matches raise rather than guess. Already
+    checked lines are left unchanged, so re-running the same selector is a no-op.
+    """
+    is_all = selector.casefold() == "all"
+    matches, rendered = [], []
+    for line in description.splitlines(keepends=True):
+        body, indent = line.lstrip(), line[:len(line) - len(line.lstrip())]
+        marker, checked = _checklist_marker(body)
+        if marker is None:
+            rendered.append(line); continue
+        rest = body[len(marker):]
+        if rest.startswith(" "): rest = rest[1:]
+        if not (is_all or selector.lower() in rest.lower()):
+            rendered.append(line); continue
+        matches.append(rest.strip())
+        rendered.append(line if checked else f"{indent}- [x] {rest}")
+    if not matches:
+        raise RuntimeError(f"No acceptance criteria matched {selector!r}; nothing checked.")
+    if not is_all and len(matches) > 1:
+        raise RuntimeError(f"Fragment {selector!r} matched {len(matches)} acceptance criteria ({'; '.join(matches)}); use a more specific fragment or --check-ac all.")
+    return "".join(rendered)
+
+
 def close_task(args):
     """Persist one final work-item patch and one Markdown completion comment.
 
-    The preflight revision avoids a redundant pre-write read. The patch's rev
-    test still prevents a write when the work item has changed.
+    ``--check-ac`` checks acceptance-criteria checkboxes server-side (the current
+    Description is read, matching unchecked lines are checked, and the full
+    Description is patched back), so marking an item done no longer requires a
+    separate fetch, local edit, and whole-Description rewrite. The preflight
+    revision avoids a redundant pre-write read.
     """
     client, cls = connect(args)
     comment = args.comment_file.read_text()
     if not comment.strip(): raise RuntimeError("Comment must not be empty.")
-    fields, text = {}, args.description_file.read_text() if args.description_file else None
+    fields, text, read_rev = {}, None, None
+    if args.check_ac is not None:
+        item = client.read(args.id)
+        read_rev = item["rev"]
+        stored = item.get("fields", {}).get("System.Description", "")
+        text = _check_checkboxes(html.unescape(stored), args.check_ac)
+    elif args.description_file is not None:
+        text = args.description_file.read_text()
     if args.state is not None: fields["System.State"] = args.state
     has_patch = text is not None or bool(fields)
     expected = args.expected_rev
     if expected is None and has_patch:
-        expected = client.read(args.id)["rev"]
+        expected = read_rev if read_rev is not None else client.read(args.id)["rev"]
     if not args.apply:
         if has_patch:
             document = [op(cls, "test", "/rev", expected)]
@@ -275,14 +353,14 @@ def connection(parser, team=False):
 def parser():
     root = argparse.ArgumentParser(description=__doc__); commands = root.add_subparsers(required=True)
     current = commands.add_parser("current-sprint"); connection(current, True); current.set_defaults(run=lambda a: print(sprint(a)))
-    show = commands.add_parser("show"); connection(show); show.add_argument("--id", type=int, required=True); show.set_defaults(run=lambda a: emit(connect(a)[0].read(a.id)))
+    show = commands.add_parser("show"); connection(show); show.add_argument("--id", type=int, required=True); show.add_argument("--full", action="store_true", help="emit the full Azure JSON"); show.set_defaults(run=show_item)
     preflight_p = commands.add_parser("implement-preflight"); connection(preflight_p); preflight_p.add_argument("--id", type=int, required=True); preflight_p.set_defaults(run=preflight)
     create_p = commands.add_parser("create"); connection(create_p, True); create_p.add_argument("--apply", action="store_true"); create_p.add_argument("--type", choices=("Epic", "Feature", "User Story", "Task", "Bug"), required=True); create_p.add_argument("--title", required=True); create_p.add_argument("--description-file", type=Path, required=True); create_p.add_argument("--iteration"); create_p.add_argument("--tags", action="append", default=[])
     for kind in RELATIONS: create_p.add_argument(f"--{kind}", action="append", type=int, default=[])
     create_p.set_defaults(run=create)
     update_p = commands.add_parser("update"); connection(update_p); update_p.add_argument("--apply", action="store_true"); update_p.add_argument("--id", type=int, required=True); update_p.add_argument("--description-file", type=Path); update_p.add_argument("--state"); update_p.add_argument("--iteration"); update_p.set_defaults(run=update)
     comment = commands.add_parser("add-comment"); connection(comment); comment.add_argument("--apply", action="store_true"); comment.add_argument("--id", type=int, required=True); comment.add_argument("--comment-file", type=Path, required=True); comment.set_defaults(run=add_comment)
-    close = commands.add_parser("close-task"); connection(close); close.add_argument("--apply", action="store_true"); close.add_argument("--id", type=int, required=True); close.add_argument("--expected-rev", type=int); close.add_argument("--description-file", type=Path); close.add_argument("--state"); close.add_argument("--comment-file", type=Path, required=True); close.set_defaults(run=close_task)
+    close = commands.add_parser("close-task"); connection(close); close.add_argument("--apply", action="store_true"); close.add_argument("--id", type=int, required=True); close.add_argument("--expected-rev", type=int); close.add_argument("--state"); close.add_argument("--comment-file", type=Path, required=True); close_body = close.add_mutually_exclusive_group(); close_body.add_argument("--description-file", type=Path); close_body.add_argument("--check-ac", metavar="all|FRAGMENT"); close.set_defaults(run=close_task)
     link = commands.add_parser("add-link"); connection(link); link.add_argument("--apply", action="store_true"); link.add_argument("--id", type=int, required=True); link.add_argument("--kind", choices=tuple(RELATIONS), required=True); link.add_argument("--target-id", type=int, required=True); link.set_defaults(run=add_link)
     return root
 

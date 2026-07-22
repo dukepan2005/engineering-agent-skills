@@ -23,6 +23,32 @@ from azure_devops_boards import (  # noqa: E402
 )
 
 
+class _RevAdvances(FakeClient):
+    """The rev advances on every validate — there is no reconciliation left to
+    attempt, so a conflict must surface on the very first attempt."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.validate_calls = 0
+
+    def validate(self, document, target):
+        self.validate_calls += 1
+        if not self._is_new(target):
+            self.items[target.item_id]["rev"] += 1
+            raise RuntimeError("rev mismatch (optimistic concurrency)")
+        return super().validate(document, target)
+
+
+class _FieldMismatchWithAdvancedRev(FakeClient):
+    """Validation reports an unrelated field mismatch while also reflecting a
+    rev that moved forward — the coincidence must never resurrect a retry."""
+
+    def validate(self, document, target):
+        item = super().validate(document, target)
+        item["rev"] += 1
+        return item
+
+
 class ValidationGuardsTheWriteTests(unittest.TestCase):
     """Any expectation that fails at validation must prevent the write entirely."""
 
@@ -125,9 +151,37 @@ class OptimisticConcurrencyTests(unittest.TestCase):
         fake = FakeClient.with_item(42)  # rev == 1
         with self.assertRaises(RuntimeError) as cm:
             safe_mutate(client=fake, target=ExistingItem(42),
-                        document=[PatchOp("test", "/rev", 99)],  # stale rev
+                        document=[PatchOp("test", "/rev", 99)],  # never the live rev
                         expectation=Expectation(), apply=True)
         self.assertIn("rev mismatch", str(cm.exception))
+        self.assertEqual(fake.applies, 0)
+
+    def test_rev_conflict_surfaces_on_first_attempt_without_retry(self):
+        # The rev advances on the very first validate — there is no retry left
+        # to attempt, so the conflict must surface immediately.
+        fake = _RevAdvances.with_item(42)
+        with self.assertRaises(RuntimeError) as cm:
+            safe_mutate(client=fake, target=ExistingItem(42),
+                        document=[PatchOp("test", "/rev", 1),
+                                  PatchOp("add", "/fields/System.State", "Active")],
+                        expectation=Expectation(fields={"System.State": "Active"}), apply=True)
+        self.assertIn("rev mismatch", str(cm.exception))
+        self.assertEqual(fake.applies, 0)
+        self.assertEqual(fake.validate_calls, 1)
+
+    def test_field_mismatch_with_advanced_rev_still_raises_immediately(self):
+        # Guard against resurrecting the reverted auto-retry: an unrelated
+        # field mismatch must surface immediately even when the rev happens to
+        # look reconcilable (moved forward) — no code path is left that
+        # inspects the raised exception to special-case it.
+        fake = _FieldMismatchWithAdvancedRev.with_item(42)
+        with self.assertRaises(RuntimeError) as cm:
+            safe_mutate(client=fake, target=ExistingItem(42),
+                        document=[PatchOp("test", "/rev", 1),
+                                  PatchOp("add", "/fields/System.State", "Active")],
+                        expectation=Expectation(fields={"System.State": "Done"}), apply=True)
+        self.assertIn("Validation failed for System.State", str(cm.exception))
+        self.assertNotIn("rev mismatch", str(cm.exception))
         self.assertEqual(fake.applies, 0)
 
 

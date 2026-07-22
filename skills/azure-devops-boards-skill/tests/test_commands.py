@@ -11,13 +11,14 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
+import html
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))                     # tests/   → fakes
 sys.path.insert(0, str(HERE.parent / "scripts"))  # scripts/ → azure_devops_boards
 
 from fakes import FakeClient, PatchOp  # noqa: E402
-from azure_devops_boards import RELATIONS, add_comment, add_link, close_task, create, parser, preflight, update  # noqa: E402
+from azure_devops_boards import RELATIONS, add_comment, add_link, close_task, create, parser, preflight, show_item, update  # noqa: E402
 
 ORG, PROJECT = "https://dev.azure.com/o", "P"
 
@@ -136,6 +137,38 @@ class AddLinkCommandTests(unittest.TestCase):
         stored = fake.read(self.ID)
         self.assertTrue(any(r["rel"] == rel["rel"] and r["url"] == rel["url"] for r in stored["relations"]))
 
+    def test_applied_mode_accepts_project_guid_in_read_back_relation_url(self):
+        class ProjectGuidRead(FakeClient):
+            def read(self, item_id):
+                item = super().read(item_id)
+                for stored in item["relations"]:
+                    stored["url"] = stored["url"].replace(f"/{PROJECT}/", "/project-guid/")
+                return item
+
+        fake = ProjectGuidRead.with_item(self.ID, rev=3)
+        out = _run(add_link, fake, self._args(apply=True))
+        self.assertEqual(out, {"mode": "applied", "id": self.ID, "kind": self.KIND, "targetId": self.TARGET})
+        self.assertEqual(fake.applies, 1)
+
+    def test_existing_project_guid_relation_is_unchanged(self):
+        fake = self._seeded()
+        stored = self._relation_value()
+        stored["url"] = stored["url"].replace(f"/{PROJECT}/", "/project-guid/")
+        fake.items[self.ID]["relations"] = [stored]
+        out = _run(add_link, fake, self._args(apply=True))
+        self.assertEqual(out, {"mode": "unchanged", "id": self.ID})
+        self.assertEqual(fake.applies, 0)
+
+    def test_different_organization_relation_with_same_id_is_not_treated_as_unchanged(self):
+        fake = self._seeded()
+        stored = self._relation_value()
+        stored["url"] = stored["url"].replace(f"{ORG}/", "https://dev.azure.com/other-org/")
+        fake.items[self.ID]["relations"] = [stored]
+        out = _run(add_link, fake, self._args(apply=True))
+        self.assertNotEqual(out, {"mode": "unchanged", "id": self.ID})
+        self.assertEqual(out, {"mode": "applied", "id": self.ID, "kind": self.KIND, "targetId": self.TARGET})
+        self.assertEqual(fake.applies, 1)
+
 
 class AddCommentCommandTests(unittest.TestCase):
     ID = 42
@@ -185,7 +218,7 @@ class ImplementationLifecycleTests(unittest.TestCase):
     def _close_args(self, apply, expected_rev=3, state="Closed"):
         return SimpleNamespace(organization=ORG, project=PROJECT, id=self.ID, apply=apply,
                                expected_rev=expected_rev, state=state, description_file=None,
-                               comment_file=_file("## Completion\nDone"))
+                               check_ac=None, comment_file=_file("## Completion\nDone"))
 
     def test_close_task_validates_without_writing(self):
         fake = self._seeded()
@@ -202,10 +235,12 @@ class ImplementationLifecycleTests(unittest.TestCase):
         self.assertEqual(fake.applies, 1)
         self.assertEqual(len(fake.comments[self.ID]), 1)
 
-    def test_close_task_stale_preflight_revision_prevents_patch_and_comment(self):
+    def test_close_task_unreconcilable_revision_prevents_patch_and_comment(self):
+        # Any rev mismatch — the expected rev no longer matches the live rev,
+        # whether behind or ahead — surfaces immediately; there is no retry.
         fake = self._seeded()
         with self.assertRaises(RuntimeError):
-            _run(close_task, fake, self._close_args(apply=True, expected_rev=2))
+            _run(close_task, fake, self._close_args(apply=True, expected_rev=5))
         self.assertEqual(fake.applies, 0)
         self.assertEqual(fake.comments, {})
 
@@ -215,6 +250,123 @@ class ImplementationLifecycleTests(unittest.TestCase):
         self.assertEqual(out["rev"], None)
         self.assertEqual(fake.applies, 0)
         self.assertEqual(len(fake.comments[self.ID]), 1)
+
+
+class CloseTaskCheckAcTests(unittest.TestCase):
+    ID = 42
+
+    def _seeded(self):
+        fake = FakeClient.with_item(self.ID, rev=3)
+        fake.items[self.ID]["fields"].update({
+            "System.Title": "T", "System.State": "Active",
+            "System.Description": "- [ ] Write tests\n- [ ] Ship it\n- [x] Hold scope",
+        })
+        return fake
+
+    def _args(self, apply, check_ac, expected_rev=3, state="Closed"):
+        return SimpleNamespace(organization=ORG, project=PROJECT, id=self.ID, apply=apply,
+                               expected_rev=expected_rev, state=state,
+                               description_file=None, check_ac=check_ac,
+                               comment_file=_file("## Completion\nDone"))
+
+    def _description(self, fake):
+        return html.unescape(fake.read(self.ID)["fields"]["System.Description"])
+
+    def test_check_ac_all_checks_incomplete_and_preserves_already_checked(self):
+        fake = self._seeded()
+        out = _run(close_task, fake, self._args(apply=True, check_ac="all"))
+        self.assertEqual(out["mode"], "applied")
+        self.assertEqual(self._description(fake), "- [x] Write tests\n- [x] Ship it\n- [x] Hold scope")
+
+    def test_check_ac_fragment_checks_single_match_case_insensitively(self):
+        fake = self._seeded()
+        _run(close_task, fake, self._args(apply=True, check_ac="WRITE"))
+        self.assertEqual(self._description(fake), "- [x] Write tests\n- [ ] Ship it\n- [x] Hold scope")
+
+    def test_check_ac_all_is_idempotent_across_repeated_runs(self):
+        fake = self._seeded()
+        first = _run(close_task, fake, self._args(apply=True, check_ac="all", expected_rev=None))
+        self.assertEqual(first["mode"], "applied")
+        after_first = self._description(fake)
+        second = _run(close_task, fake, self._args(apply=True, check_ac="all", expected_rev=None))
+        self.assertEqual(second["mode"], "applied")
+        self.assertEqual(self._description(fake), after_first)
+
+    def test_check_ac_without_expected_rev_reuses_single_read_for_rev(self):
+        class CountingReads(FakeClient):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.read_calls = 0
+
+            def read(self, item_id):
+                self.read_calls += 1
+                return super().read(item_id)
+
+        fake = CountingReads.with_item(self.ID, rev=3)
+        fake.items[self.ID]["fields"].update({
+            "System.Title": "T", "System.State": "Active",
+            "System.Description": "- [ ] Write tests\n- [ ] Ship it\n- [x] Hold scope",
+        })
+        out = _run(close_task, fake, self._args(apply=True, check_ac="all", expected_rev=None))
+        self.assertEqual(out["mode"], "applied")
+        # One read fetches the Description (and its rev) for --check-ac; one
+        # read-back inside safe_mutate confirms the persisted result. No
+        # separate read solely to fetch a fresh rev — that would reintroduce a
+        # gap between two inconsistent reads (the Description from the first,
+        # the rev from the second) that a concurrent edit could land in.
+        self.assertEqual(fake.read_calls, 2)
+        self.assertEqual(self._description(fake), "- [x] Write tests\n- [x] Ship it\n- [x] Hold scope")
+
+    def test_check_ac_no_match_raises_without_writing(self):
+        fake = self._seeded()
+        with self.assertRaises(RuntimeError) as cm:
+            _run(close_task, fake, self._args(apply=True, check_ac="nonexistent"))
+        self.assertIn("No acceptance criteria matched", str(cm.exception))
+        self.assertEqual(fake.applies, 0)
+        self.assertEqual(fake.comments, {})
+
+    def test_check_ac_ambiguous_fragment_raises(self):
+        fake = FakeClient.with_item(self.ID, rev=3)
+        fake.items[self.ID]["fields"].update({
+            "System.Title": "T", "System.State": "Active",
+            "System.Description": "- [ ] Write unit tests\n- [ ] Write integration tests\n- [x] Hold scope",
+        })
+        with self.assertRaises(RuntimeError) as cm:
+            _run(close_task, fake, self._args(apply=True, check_ac="write"))
+        self.assertIn("Write unit tests", str(cm.exception))
+        self.assertIn("Write integration tests", str(cm.exception))
+        self.assertEqual(fake.applies, 0)
+        self.assertEqual(fake.comments, {})
+
+    def test_parser_rejects_check_ac_alongside_description_file(self):
+        with self.assertRaises(SystemExit):
+            parser().parse_args(["close-task", "--organization", ORG, "--project", PROJECT,
+                                 "--id", "42", "--check-ac", "all", "--description-file", "/tmp/x.md",
+                                 "--comment-file", "/tmp/c.md"])
+
+
+class ShowFullTests(unittest.TestCase):
+    def test_show_default_emits_compact_summary(self):
+        fake = FakeClient.with_item(42, rev=3)
+        fake.items[42]["fields"].update({"System.Title": "T", "System.State": "Active"})
+        out = _run_with_func(show_item, fake, SimpleNamespace(organization=ORG, project=PROJECT, id=42, full=False))
+        self.assertEqual(out, {"id": 42, "rev": 3, "type": "Task", "state": "Active", "title": "T", "relations": []})
+        self.assertNotIn("fields", out)
+
+    def test_show_full_emits_full_item(self):
+        fake = FakeClient.with_item(42, rev=3)
+        fake.items[42]["fields"].update({"System.Title": "T", "System.State": "Active"})
+        out = _run_with_func(show_item, fake, SimpleNamespace(organization=ORG, project=PROJECT, id=42, full=True))
+        self.assertEqual(out["id"], 42)
+        self.assertEqual(out["rev"], 3)
+        self.assertIn("fields", out)
+
+
+def _run_with_func(func, fake, args):
+    with redirect_stdout(io.StringIO()) as buf, \
+            mock.patch("azure_devops_boards.connect", return_value=(fake, PatchOp)):
+        func(args)
+    return json.loads(buf.getvalue())
 
 
 if __name__ == "__main__":

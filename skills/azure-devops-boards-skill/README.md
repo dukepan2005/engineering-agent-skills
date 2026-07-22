@@ -16,11 +16,11 @@ The authoritative agent workflow is in [`SKILL.md`](SKILL.md). Repository-specif
 
 ## Safety model
 
-Mutation commands are validate-only by default. A write occurs only when the same command is repeated with `--apply`.
+Mutating commands validate server-side, apply, and verify the persisted read-back in one `--apply` call. Two-phase validate-then-apply (the identical command run first without `--apply`, then repeated with it) is available as an opt-in for high-risk changes or human review.
 
-Updates use Azure DevOps work-item revisions for optimistic concurrency. Descriptions and comments are verified as Markdown, and persisted fields or relations are read back before success is reported.
+Updates use Azure DevOps work-item revisions for optimistic concurrency: a stale revision fails the mutation immediately, with no automatic retry. Descriptions and comments are verified as Markdown, and persisted fields or relations are read back before success is reported.
 
-When a repository requires checklist synchronization, update and verify the Markdown description before changing the work-item state. The Skill does not decide which acceptance criteria have been satisfied.
+The close flow sets the terminal state and posts one completion comment; it does not read or rewrite the Description. `close-task --check-ac` remains available as an opt-in that checks matching acceptance-criteria checkboxes server-side, but the default close path does not use it — acceptance status goes in the comment. The Skill does not decide which acceptance criteria have been satisfied.
 
 The helper uses the locally authenticated Azure CLI SDK. It does not accept, read, or print a personal access token.
 
@@ -85,22 +85,14 @@ Read operations execute immediately:
 
 ```bash
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" current-sprint
-sh "$SKILL_DIR/scripts/azure-devops-boards.sh" show --id 61
+sh "$SKILL_DIR/scripts/azure-devops-boards.sh" show --id 61               # compact summary
+sh "$SKILL_DIR/scripts/azure-devops-boards.sh" show --id 61 --full        # raw Azure JSON
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" implement-preflight --id 61
 ```
 
-Prepare long descriptions and comments as Markdown files. Validate a Task creation without writing:
-
-```bash
-sh "$SKILL_DIR/scripts/azure-devops-boards.sh" create \
-  --type Task \
-  --title 'Implement contract' \
-  --description-file /tmp/task.md \
-  --tags ready-for-agent \
-  --parent 61
-```
-
-Review the validation result, then repeat the identical command with `--apply`:
+Prepare long descriptions and comments as Markdown files. Mutating commands
+default to a single `--apply` call — the helper validates server-side, applies,
+and verifies the persisted read-back in that one call:
 
 ```bash
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" create --apply \
@@ -109,39 +101,40 @@ sh "$SKILL_DIR/scripts/azure-devops-boards.sh" create --apply \
   --description-file /tmp/task.md \
   --tags ready-for-agent \
   --parent 61
-```
 
-The same two-step rule applies to updates, comments, and links:
-
-```bash
-sh "$SKILL_DIR/scripts/azure-devops-boards.sh" update \
+sh "$SKILL_DIR/scripts/azure-devops-boards.sh" update --apply \
   --id 123 --state Active
 
-sh "$SKILL_DIR/scripts/azure-devops-boards.sh" add-comment \
+sh "$SKILL_DIR/scripts/azure-devops-boards.sh" add-comment --apply \
   --id 123 --comment-file /tmp/comment.md
 
-sh "$SKILL_DIR/scripts/azure-devops-boards.sh" add-link \
+sh "$SKILL_DIR/scripts/azure-devops-boards.sh" add-link --apply \
   --id 124 --kind predecessor --target-id 123
 ```
+
+For a high-risk change, or when a human should review before the write, omit
+`--apply` first to validate only, then repeat the identical command with
+`--apply`.
 
 For `predecessor`, the target work item blocks the current work item. For `parent`, the target is the current work item's parent. Re-adding an existing relation returns `unchanged`.
 
 For an implementation Task, use one compact preflight snapshot before editing,
-then validate and apply one closeout command at the end:
+then one closeout command at the end:
 
 ```bash
-sh "$SKILL_DIR/scripts/azure-devops-boards.sh" close-task \
-  --id 123 --expected-rev 8 --state Closed --comment-file /tmp/completion.md
-
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" close-task --apply \
   --id 123 --expected-rev 8 --state Closed --comment-file /tmp/completion.md
 ```
 
-`implement-preflight` retains structured acceptance criteria, or falls back to
-the complete Description when it cannot safely identify them. `close-task`
-combines the final work-item patch and one Markdown comment, then verifies both
-persisted results. The two Azure operations remain separately verified rather
-than being presented as an atomic transaction.
+`close-task` sets the terminal state and posts one Markdown completion comment
+in a single call; it does not read or rewrite the Description. (`--check-ac
+all|FRAGMENT` remains an opt-in that checks matching acceptance-criteria
+checkboxes in the live Description server-side, without unchecking any that are
+already done.) `implement-preflight` retains structured acceptance criteria, or
+falls back to the complete Description when it cannot safely identify them. The
+close call verifies both persisted results. The two Azure operations remain
+separately verified rather than being presented as an atomic transaction. A
+stale revision fails the mutation immediately, with no automatic retry.
 
 ## Workflow integration
 
