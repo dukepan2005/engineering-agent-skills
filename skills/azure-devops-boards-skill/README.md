@@ -20,7 +20,7 @@ Mutating commands validate server-side, apply, and verify the persisted read-bac
 
 Updates use Azure DevOps work-item revisions for optimistic concurrency: a stale revision fails the mutation immediately, with no automatic retry. Descriptions and comments are verified as Markdown, and persisted fields or relations are read back before success is reported.
 
-When a repository requires checklist synchronization, `close-task --check-ac` checks matching acceptance-criteria checkboxes server-side instead of the caller reading and rewriting the Description. The Skill does not decide which acceptance criteria have been satisfied.
+The close flow sets the terminal state and posts one completion comment; it does not read or rewrite the Description. `close-task --check-ac` remains available as an opt-in that checks matching acceptance-criteria checkboxes server-side, but the default close path does not use it — acceptance status goes in the comment. The Skill does not decide which acceptance criteria have been satisfied.
 
 The helper uses the locally authenticated Azure CLI SDK. It does not accept, read, or print a personal access token.
 
@@ -123,19 +123,18 @@ then one closeout command at the end:
 
 ```bash
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" close-task --apply \
-  --id 123 --expected-rev 8 --state Closed --comment-file /tmp/completion.md \
-  --check-ac all
+  --id 123 --expected-rev 8 --state Closed --comment-file /tmp/completion.md
 ```
 
-`--check-ac all|FRAGMENT` checks matching acceptance-criteria checkboxes in the
-live Description server-side, without unchecking any that are already done,
-instead of the caller reading and rewriting the whole Description.
-`implement-preflight` retains structured acceptance criteria, or falls back to
-the complete Description when it cannot safely identify them. `close-task`
-combines the final work-item patch and one Markdown comment, then verifies both
-persisted results. The two Azure operations remain separately verified rather
-than being presented as an atomic transaction. A stale revision fails the
-mutation immediately, with no automatic retry.
+`close-task` sets the terminal state and posts one Markdown completion comment
+in a single call; it does not read or rewrite the Description. (`--check-ac
+all|FRAGMENT` remains an opt-in that checks matching acceptance-criteria
+checkboxes in the live Description server-side, without unchecking any that are
+already done.) `implement-preflight` retains structured acceptance criteria, or
+falls back to the complete Description when it cannot safely identify them. The
+close call verifies both persisted results. The two Azure operations remain
+separately verified rather than being presented as an atomic transaction. A
+stale revision fails the mutation immediately, with no automatic retry.
 
 ## Workflow integration
 

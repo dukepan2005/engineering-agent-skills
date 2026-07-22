@@ -10,6 +10,10 @@ the commit and the work item already carry the detail.
 
 Implemented in <commit-sha>: <areas changed>.
 
+## Acceptance
+All acceptance criteria are satisfied. <one line per criterion from the preflight
+scope: how each is met; or state the scope defined no acceptance criteria>
+
 ## Verification
 <focused commands run, with their pass evidence — not the full suite>
 

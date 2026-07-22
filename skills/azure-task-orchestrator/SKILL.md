@@ -157,17 +157,21 @@ step 1: Codex uses `spawn_agent` directly; hosts with named agent types use
 
 Closeout policy (apply before spawning):
 - Write the closeout comment returned by step 2 into a temporary Markdown file.
-- Use `--check-ac all` unless only a specific subset of acceptance criteria are
-  evidence-backed, in which case use a fragment that uniquely matches that item.
-- Pass `--state` only when the user or repository guidance explicitly requires
-  a final state. If neither specifies one, leave the state unchanged.
+- Close the work item to `Closed`: pass `--state Closed`. If repository guidance
+  names a different terminal state for a non-Task type, use that stated value.
+- Set state and post the comment only. Do not read or mutate the Description on
+  close — never pass `--check-ac` or `--description-file`. Both trigger a read
+  and a Description rewrite; acceptance-criteria status belongs in the comment,
+  not the work-item Description.
+- Always pass `--expected-rev` (the preflight revision from step 1). It is the
+  optimistic-lock test and it is what keeps close from re-reading the item.
 
 Give the agent the work-item ID, the preflight revision from step 1, the
 temporary comment file path, and the instruction (resolve `<skill-dir>` as in
 step 1):
 
 ```text
-Read `<skill-dir>/references/commands.md` to resolve the helper path, then run `close-task --apply --id <id> --expected-rev <rev> --check-ac <all|fragment> --comment-file <tmpfile> [--state <state>]`. Return the JSON output unchanged.
+Read `<skill-dir>/references/commands.md` to resolve the helper path, then run `close-task --apply --id <id> --expected-rev <rev> --state Closed --comment-file <tmpfile>`. Return the JSON output unchanged. Do not add `--check-ac` or `--description-file`.
 ```
 
 Collect the closeout result. If the closeout fails because the expected rev is
