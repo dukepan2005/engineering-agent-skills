@@ -164,6 +164,36 @@ class SkillDependencyContractTests(unittest.TestCase):
             text,
         )
 
+    def test_claude_code_delivery_loop_script_exists_and_is_valid(self) -> None:
+        script_path = REPO_ROOT / "skills" / "azure-task-orchestrator" / "references" / "claude-code-delivery-loop.js"
+        self.assertTrue(
+            script_path.exists(),
+            f"Workflow script template not found at {script_path}",
+        )
+
+        script_text = script_path.read_text()
+
+        # Verify meta block structure
+        self.assertIn("export const meta = {", script_text)
+        self.assertIn("'azure-task-orchestrator-delivery'", script_text)
+        self.assertIn("phases:", script_text)
+
+        # Verify PROFILES registry matches execution-profiles.md
+        self.assertIn("const PROFILES = {", script_text)
+        self.assertIn("'terra-medium': { model: 'sonnet', effort: 'medium' }", script_text)
+        self.assertIn("'sol-xhigh': { model: 'fable', effort: 'xhigh' }", script_text)
+
+        # Verify core agent() calls for three steps
+        self.assertIn("agent(", script_text)
+        self.assertIn("preflight", script_text.lower())
+        self.assertIn("implement", script_text.lower())
+        self.assertIn("closeout", script_text.lower())
+
+        # Verify script returns a report structure
+        self.assertIn("return report", script_text)
+        self.assertIn("totalItems", script_text)
+        self.assertIn("completedItems", script_text)
+
 
 if __name__ == "__main__":
     unittest.main()

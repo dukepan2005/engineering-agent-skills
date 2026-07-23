@@ -150,6 +150,11 @@ inside that one script so each item's three steps complete, in order, before
 the next item's steps begin. No user input is needed once this script starts,
 since confirmation already happened in the main loop before it was invoked.
 
+See [references/claude-code-delivery-loop.js](references/claude-code-delivery-loop.js)
+for the complete Workflow script template. The script takes the validated plan,
+preflight results, and planner report as `args`, and returns an ordered delivery
+report with completion status for each work item.
+
 ### 1. Preflight — spawn cheap agent
 
 Spawn an agent with `model=gpt-5.6-luna` and `reasoning_effort=low` on Codex,
