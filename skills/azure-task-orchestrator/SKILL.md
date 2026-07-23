@@ -41,8 +41,9 @@ Story or explicit work-item set and this self-contained instruction:
 
 ```text
 Use `$azure-devops-boards-skill` in its semantic `task-boards-ops` role. For a
-Story, run `planning-snapshot --story <story-id>` once. It must use the
-server-side query to select only direct New Task and Bug children, then return
+Story, run `planning-snapshot --story <story-id>` once. The Story's state does
+not gate this read-only snapshot; the server-side query must select only its direct New Task and Bug children,
+then return
 one JSON snapshot containing the Story and every selected target. Do not read a
 non-New child. For an explicit set, run
 `planning-snapshot --id <id> --id <id>` once for the requested Task/Bug set;

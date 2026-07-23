@@ -155,7 +155,7 @@ MODE (MustContain)"""
         for relation in relations:
             target = relation.get("target")
             target_id = target.get("id") if target else None
-            if target_id is not None and int(target_id) not in seen_ids:
+            if target_id is not None and int(target_id) != story_id and int(target_id) not in seen_ids:
                 target_id = int(target_id)
                 seen_ids.add(target_id)
                 target_ids.append(target_id)
@@ -303,6 +303,11 @@ def planning_snapshot(args):
 
     targets = []
     for item_id in target_ids:
+        # Azure WIQL link results can echo the source item as a target row.
+        # The Story is context and its state does not gate this read; only its
+        # children are subject to the New Task/Bug planning gate.
+        if story_id is not None and item_id == story_id:
+            continue
         item = client.read(item_id)
         item_type = item.get("fields", {}).get("System.WorkItemType")
         item_state = item.get("fields", {}).get("System.State")

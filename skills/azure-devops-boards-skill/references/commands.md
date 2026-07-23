@@ -94,9 +94,10 @@ or add Description's Markdown metadata to those fields.
 ## Keep implementation synchronization compact
 
 For Story planning, run `planning-snapshot --story` once. It validates the
-parent as a Story/User Story, then uses a server-side direct link query to
-select only the Story's direct `New` `Task` and `Bug` children; it does not read
-a non-New child. For an explicit set, repeat `--id` in one
+parent as a Story/User Story; the parent's state does not gate this read-only
+snapshot, including `Closed`. It then uses
+a server-side direct link query to select only the Story's direct `New` `Task`
+and `Bug` children; it does not read a non-New child. For an explicit set, repeat `--id` in one
 `planning-snapshot` call for each requested Task or Bug. It validates each type
 and preserves the supplied order without inventing a parent. The single JSON
 result includes the Story or explicit targets and

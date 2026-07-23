@@ -22,10 +22,11 @@ tracker.
    remaining authorities bound the work. Do not read Azure Boards to fill the
    gap.
 2. Read the nearest `AGENTS.md` and every repository guidance file it requires.
-3. For a Story, analyze only the direct New Task and Bug children returned in
-   the snapshot, each separately. Do not treat a non-New child or a relation
-   target outside that set as a planner target. For an explicit work-item set,
-   analyze only the named items in the snapshot.
+3. Analyze each target item explicitly supplied in the snapshot, regardless of
+   its current state. When the upstream orchestrator starts from a Story, it
+   may provide only direct New Task/Bug children; that is an orchestration
+   work-set decision, not a planner validation rule. For an explicit work-item
+   set, analyze every named Task or Bug, including Active or Closed items.
 4. Use the snapshot's blocking, prerequisite, replacement, and
    cross-repository relations when they materially affect a recommendation.
 5. Inspect current code or tests only when the snapshot and its documents do

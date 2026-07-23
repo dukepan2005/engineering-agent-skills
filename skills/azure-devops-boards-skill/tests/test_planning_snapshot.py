@@ -114,10 +114,36 @@ class PlanningSnapshotTests(unittest.TestCase):
         self.assertIsNone(out["parent"])
         self.assertEqual([item["id"] for item in out["targets"]], [self.NEW_BUG, self.NEW_TASK])
 
+    def test_explicit_snapshot_accepts_active_task_when_given_by_id(self):
+        fake = self._seeded()
+        out = _run(
+            planning_snapshot,
+            fake,
+            SimpleNamespace(organization=ORG, project=PROJECT, story=None,
+                             item_ids=[self.ACTIVE_TASK]),
+        )
+
+        self.assertEqual([item["id"] for item in out["targets"]], [self.ACTIVE_TASK])
+
     def test_story_snapshot_rejects_non_story_parent(self):
         fake = FakeClient.with_item(self.STORY, item_type="Task")
         with self.assertRaisesRegex(RuntimeError, "requires a Story parent"):
             _run(planning_snapshot, fake, SimpleNamespace(organization=ORG, project=PROJECT, story=self.STORY))
+
+    def test_story_snapshot_allows_closed_parent_when_children_are_new(self):
+        fake = self._seeded()
+        fake.items[self.STORY]["fields"]["System.State"] = "Closed"
+        out = _run(planning_snapshot, fake, SimpleNamespace(organization=ORG, project=PROJECT, story=self.STORY))
+        self.assertEqual([item["id"] for item in out["targets"]], [self.NEW_TASK, self.NEW_BUG])
+
+    def test_story_state_is_not_validated_as_a_new_planning_target(self):
+        fake = self._seeded()
+        fake.items[self.STORY]["fields"]["System.State"] = "Active"
+        fake.new_direct_implementation_children = lambda story_id: [self.STORY, self.NEW_TASK]
+
+        out = _run(planning_snapshot, fake, SimpleNamespace(organization=ORG, project=PROJECT, story=self.STORY))
+
+        self.assertEqual([item["id"] for item in out["targets"]], [self.NEW_TASK])
 
     def test_story_snapshot_rejects_target_that_is_no_longer_new(self):
         fake = self._seeded()
@@ -178,6 +204,7 @@ class AzurePlanningQueryTests(unittest.TestCase):
             def _send(self, **kwargs):
                 self.request = kwargs
                 return SimpleNamespace(json=lambda: {"workItemRelations": [
+                    {"target": {"id": 1}},
                     {"target": {"id": 9}},
                     {"target": {"id": 4}},
                 ]})
