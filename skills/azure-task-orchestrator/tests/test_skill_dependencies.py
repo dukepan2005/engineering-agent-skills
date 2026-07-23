@@ -35,14 +35,40 @@ class SkillDependencyContractTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, text)
 
-    def test_planner_delegates_boards_by_skill_name(self) -> None:
+    def test_planner_consumes_parent_snapshot_without_boards_dispatch(self) -> None:
         text = self.read_skill("task-model-planner")
 
-        self.assertIn("Use `$azure-devops-boards-skill`", text)
-        self.assertIn("`model=gpt-5.6-luna` and `reasoning_effort=low`", text)
-        self.assertIn("on Claude\n   Code, use Haiku with low reasoning", text)
+        self.assertIn("authoritative tracker snapshot from the parent", text)
+        self.assertIn("Do not read Azure Boards", text)
+        self.assertNotIn("Use `$azure-devops-boards-skill`", text)
+        self.assertNotIn("task-boards-ops", text)
+        self.assertNotIn("spawn a child", text.lower())
         self.assertNotIn("<skill-dir>", text)
         self.assertNotIn("absolute path", text)
+
+    def test_orchestrator_reads_planning_snapshot_before_planner(self) -> None:
+        text = self.read_skill("azure-task-orchestrator")
+
+        self.assertIn("Planning Snapshot — spawn task-boards-ops", text)
+        self.assertIn("planning-snapshot --story <story-id>", text)
+        self.assertIn("planning-snapshot --id <id> --id <id>", text)
+        self.assertIn("direct New Task and Bug children", text)
+        self.assertRegex(text, re.compile(r"Do not read a\s+non-New child"))
+        self.assertRegex(text, re.compile(r"Then\s+pass that composite snapshot to\s+`\$task-model-planner`"))
+        self.assertIn("linked specification documents", text)
+        self.assertIn("`linkedSpecifications` collection", text)
+        self.assertIn("`{reference, material, content}` decision", text)
+        self.assertIn("Accept both Task and Bug targets", text)
+        self.assertIn("planner is\n   read-only planning logic; it must not read Azure Boards", text)
+
+    def test_planner_requires_type_specific_fields_when_description_is_absent(self) -> None:
+        text = self.read_skill("task-model-planner")
+
+        self.assertIn("all fields", text)
+        self.assertIn("type-specific field data", text)
+        self.assertIn("full Markdown", text)
+        self.assertIn("`content`", text)
+        self.assertIn("return `Input not ready`", text)
 
     def test_implementation_embeds_the_local_implement_flow_only(self) -> None:
         text = self.read_skill("azure-task-implement")

@@ -1,6 +1,6 @@
 ---
 name: task-model-planner
-description: Analyze implementation-ready Azure work items produced after the grill-with-docs, to-spec, and to-tickets skills, then recommend one source-backed execution profile for each item. Use when the user asks which model profile, reasoning effort, or cost-aware execution configuration should implement a Story's child items or an explicit work-item set, including Tasks and Bugs.
+description: Analyze a parent-provided Azure work-item snapshot produced after the grill-with-docs, to-spec, and to-tickets skills, then recommend one source-backed execution profile for each item. Use when the user asks which model profile, reasoning effort, or cost-aware execution configuration should implement a Story's child items or an explicit work-item set, including Tasks and Bugs.
 ---
 
 # Task Model Planner
@@ -10,28 +10,52 @@ tracker.
 
 ## Establish the Work Set
 
-1. Read the nearest `AGENTS.md` and every repository guidance file it requires.
-2. Read the current authoritative parent or target work item, including
-   revision, state, acceptance criteria, relations, comments, attachments, and
-   linked specification documents that affect scope.
-3. For a Story, analyze each directly related implementation-ready child work
-   item separately, regardless of whether Azure labels it Task or Bug. For an
-   explicit work-item set, analyze only the named items.
-4. Read blocking, prerequisite, replacement, or cross-repository tickets only
-   when they materially affect a recommendation.
-5. Use `$azure-devops-boards-skill` for every Azure Boards read. On Codex,
-   spawn a child with `model=gpt-5.6-luna` and `reasoning_effort=low`; on Claude
-   Code, use Haiku with low reasoning. Assign the child the semantic
-   `task-boards-ops` role and tell it to run the required `show` or
-   `implement-preflight` operation. Do not duplicate tracker mechanics in the
-   planner.
-6. Inspect current code or tests only when the ticket and its documents do not
-   provide enough evidence to classify complexity. Label any conclusion based
-   on incomplete evidence with lower confidence.
+1. Require an authoritative tracker snapshot from the parent. It must include
+   the requested parent or target items, revisions, states, all fields and
+   multiline formats, relations, comments/discussion, attachments, and raw
+   linked specification references. When a referenced specification affects
+   scope, the parent must also provide its document content in the composite
+   snapshot. Each item without Description must include the complete
+   type-specific field data returned by Boards, including empty native fields
+   when Azure returns them. Missing field data or a stale/incomplete snapshot
+   is `Input not ready`; empty Bug fields alone are not incomplete when the
+   remaining authorities bound the work. Do not read Azure Boards to fill the
+   gap.
+2. Read the nearest `AGENTS.md` and every repository guidance file it requires.
+3. For a Story, analyze only the direct New Task and Bug children returned in
+   the snapshot, each separately. Do not treat a non-New child or a relation
+   target outside that set as a planner target. For an explicit work-item set,
+   analyze only the named items in the snapshot.
+4. Use the snapshot's blocking, prerequisite, replacement, and
+   cross-repository relations when they materially affect a recommendation.
+5. Inspect current code or tests only when the snapshot and its documents do
+   not provide enough evidence to classify complexity. Label any conclusion
+   based on incomplete evidence with lower confidence.
 
-Treat the current tracker, linked specifications, and current code as
+Treat the parent-provided snapshot, linked specifications, and current code as
 authoritative over earlier plans or summaries. State conflicts instead of
-silently resolving them.
+silently resolving them. Do not read Azure Boards or spawn a Boards child.
+
+The Boards snapshot may contain only raw linked references. The parent-provided
+composite snapshot must preserve that Boards JSON and add a
+`linkedSpecifications` decision for each raw linked reference. Each decision
+contains the matching `reference`, a `material` boolean, and full Markdown
+`content` when `material` is true. A missing decision, an unmatched reference,
+or empty/whitespace-only content for a material specification is `Input not
+ready`; do not infer the specification from an attachment URL or relation
+metadata.
+
+Description is one possible scope authority, not a universal one. For a Bug or
+another item without Description, classify scope and verification from the
+snapshot's type-specific fields (for example Repro Steps/System Info),
+comments/discussion, linked specification, and relations. If the Bug-specific
+fields are empty, Discussion comments may be the actual reproduction evidence;
+do not discard them or mark the snapshot incomplete for that reason.
+`discussion.comments` is the current paginated Comments API result; it is not
+the complete revision history unless a history/revisions payload was explicitly
+supplied. Do not return `Input not ready` merely because Description or the
+Bug-specific fields are empty; return it only when the combined authorities
+cannot bound the work.
 
 ## Verify Planning Readiness
 
@@ -44,7 +68,7 @@ upstream workflow. Before choosing any profile, verify that:
   acceptance criteria, and focused verification requirements;
 - prerequisite, blocker, replacement, and cross-repository relations are
   present when the specification requires them;
-- the specification, work items, current tracker state, and any inspected current
+- the specification, snapshot state, and any inspected current
   code do not materially conflict.
 
 If an artifact is missing or materially inconsistent, return an
@@ -224,9 +248,9 @@ Use this structure:
 - Recommended execution order when authority defines one:
 - Conditions that require re-planning:
 
-This report is planning guidance only. Before implementing each work item, re-read
-its current revision, relations, repository state, and relevant code. If they
-conflict with this report, current authority and code win.
+This report is planning guidance only. Before implementing each work item, the
+parent must re-preflight its current revision and relations. If they conflict
+with this report, current authority and code win.
 ```
 
 Keep reasons specific and compact. Avoid generic claims such as “complex task”

@@ -11,6 +11,22 @@ import subprocess
 import sys
 
 RELATIONS = {"parent": "System.LinkTypes.Hierarchy-Reverse", "predecessor": "System.LinkTypes.Dependency-Reverse", "related": "System.LinkTypes.Related"}
+PLANNING_TYPES = ("Task", "Bug")
+PLANNING_PARENT_TYPES = ("Story", "User Story")
+PLANNING_STATE = "New"
+_BUG_SCOPE_FIELDS = frozenset({
+    "Microsoft.VSTS.TCM.ReproSteps",
+    "Microsoft.VSTS.TCM.SystemInfo",
+    "Microsoft.VSTS.TCM.FoundInBuild",
+    "Microsoft.VSTS.Common.AcceptanceCriteria",
+    "Microsoft.VSTS.Common.Priority",
+    "Microsoft.VSTS.Common.Severity",
+})
+_GENERIC_SCOPE_FIELDS = frozenset({
+    "System.AreaPath", "System.ChangedDate", "System.CreatedDate", "System.Id",
+    "System.IterationPath", "System.Rev", "System.State", "System.TeamProject",
+    "System.Title", "System.WorkItemType",
+})
 
 
 @dataclass(frozen=True)
@@ -47,6 +63,15 @@ def op(cls, verb, path, value): return cls(op=verb, path=path, value=value)
 def emit(value): print(json.dumps(value, ensure_ascii=False, indent=2, default=str))
 
 
+def _comment_id(comment):
+    """Return a comment identifier across Azure's ``id``/``commentId`` shapes."""
+    for key in ("id", "commentId"):
+        value = comment.get(key)
+        if value is not None:
+            return value
+    return None
+
+
 def sprint(args):
     command = ["az", "boards", "iteration", "team", "list", "--org", args.organization, "--project", args.project, "--team", args.team, "--timeframe", "current", "--query", "[0].path", "-o", "tsv"]
     result = subprocess.run(command, capture_output=True, text=True)
@@ -69,6 +94,7 @@ class AzureClient:
     CREATE_ID = "62d3d110-0047-428c-ad3c-4fe872c91c74"
     ITEM_ID = "72c7ddf8-2cdc-4f60-90cd-ab71c14a399b"
     COMMENT_ID = "608aac0a-32e1-4493-a863-b9cf4566d257"
+    WIQL_ID = "1a9c53f7-f243-4447-b110-35ef023636e4"
 
     def __init__(self, api, project):
         self._api = api
@@ -89,8 +115,51 @@ class AzureClient:
 
     def add_comment(self, work_item_id, text):
         created = self._api._send(http_method="POST", location_id=self.COMMENT_ID, version="7.1-preview.4", route_values={"project": self._project, "workItemId": work_item_id}, query_parameters={"format": "markdown"}, content={"text": text}, media_type="application/json").json()
-        comments = self._api._send(http_method="GET", location_id=self.COMMENT_ID, version="7.1-preview.4", route_values={"project": self._project, "workItemId": work_item_id}, query_parameters={"$expand": "all", "order": "asc"}).json().get("comments", [])
-        return next((item for item in comments if item.get("id") == created.get("id")), None)
+        created_id = _comment_id(created)
+        if created_id is None:
+            raise RuntimeError("Comments API did not return a comment id.")
+        comments = self.read_comments(work_item_id)
+        return next(
+            (item for item in comments if str(_comment_id(item)) == str(created_id)),
+            None,
+        )
+
+    def read_comments(self, work_item_id):
+        comments, seen_tokens, token = [], set(), None
+        while True:
+            parameters = {"$expand": "all", "order": "asc"}
+            if token is not None:
+                if token in seen_tokens:
+                    raise RuntimeError("Comments API repeated its continuation token.")
+                seen_tokens.add(token)
+                parameters["continuationToken"] = token
+            page = self._api._send(http_method="GET", location_id=self.COMMENT_ID, version="7.1-preview.4", route_values={"project": self._project, "workItemId": work_item_id}, query_parameters=parameters).json()
+            comments.extend(page.get("comments", []))
+            token = page.get("continuationToken")
+            if token is None:
+                return comments
+
+    def new_direct_implementation_children(self, story_id):
+        query = f"""SELECT [System.Id]
+FROM WorkItemLinks
+WHERE ([Source].[System.Id] = {story_id})
+  AND ([System.Links.LinkType] = 'System.LinkTypes.Hierarchy-Forward')
+  AND ([Target].[System.State] = '{PLANNING_STATE}')
+  AND ([Target].[System.WorkItemType] IN ('Task', 'Bug'))
+MODE (MustContain)"""
+        result = self._api._send(http_method="POST", location_id=self.WIQL_ID, version="5.0",
+                                 route_values={"project": self._project}, content={"query": query},
+                                 media_type="application/json").json()
+        relations = result.get("workItemRelations", [])
+        target_ids, seen_ids = [], set()
+        for relation in relations:
+            target = relation.get("target")
+            target_id = target.get("id") if target else None
+            if target_id is not None and int(target_id) not in seen_ids:
+                target_id = int(target_id)
+                seen_ids.add(target_id)
+                target_ids.append(target_id)
+        return target_ids
 
     def _route(self, target):
         if isinstance(target, NewItem): return {"project": self._project, "type": target.item_type}, "POST", self.CREATE_ID
@@ -141,9 +210,9 @@ def _relation_summary(item):
     return result
 
 
-def _scope_summary(description):
+def _scope_summary(fields):
     """Keep structured acceptance criteria; otherwise retain authority text."""
-    text = html.unescape(description or "")
+    text = html.unescape(fields.get("System.Description", "") or "")
     lines = text.splitlines()
     checklist = [line.strip() for line in lines if line.lstrip().startswith(("- [ ]", "- [x]", "- [X]"))]
     if checklist:
@@ -157,18 +226,112 @@ def _scope_summary(description):
                 break
             body.append(line)
         return {"source": "acceptance-heading", "acceptanceCriteria": "\n".join(body).strip()}
-    return {"source": "description-fallback", "description": text}
+    if text.strip():
+        return {"source": "description-fallback", "description": text}
+    retained = {
+        key: value for key, value in fields.items()
+        if key not in _GENERIC_SCOPE_FIELDS and value not in (None, "")
+    }
+    known = {
+        key: retained[key] for key in _BUG_SCOPE_FIELDS if key in retained
+    }
+    result = {
+        "source": "type-specific-fields",
+        "fields": retained,
+    }
+    if fields.get("System.WorkItemType") == "Bug":
+        result["knownBugFields"] = known
+    return result
+
+
+def _attachments(item):
+    return [relation for relation in item.get("relations", [])
+            if relation.get("rel") == "AttachedFile"]
+
+
+def _linked_references(item):
+    """Return raw candidate references without claiming they are specification bodies."""
+    return [relation for relation in item.get("relations", [])
+            if relation.get("rel") in {"AttachedFile", "Hyperlink"}]
+
+
+def _planning_item_snapshot(client, item):
+    fields = item.get("fields", {})
+    item_id = item.get("id")
+    comments = client.read_comments(item_id)
+    return {
+        "id": item_id,
+        "rev": item.get("rev"),
+        "type": fields.get("System.WorkItemType"),
+        "state": fields.get("System.State"),
+        "title": fields.get("System.Title"),
+        "fields": fields,
+        "multilineFieldsFormat": item.get("multilineFieldsFormat", {}),
+        "relations": item.get("relations", []),
+        "relationSummary": _relation_summary(item),
+        "attachments": _attachments(item),
+        "linkedReferences": _linked_references(item),
+        "comments": comments,
+        "discussion": {"comments": comments},
+        "scope": _scope_summary(fields),
+    }
+
+
+def planning_snapshot(args):
+    """Emit one complete planning authority snapshot for a Story or explicit item set."""
+    client = connect(args)[0]
+    story_id = getattr(args, "story", None)
+    item_ids = getattr(args, "item_ids", None)
+    if story_id is not None:
+        parent = client.read(story_id)
+        parent_type = parent.get("fields", {}).get("System.WorkItemType")
+        if parent_type not in PLANNING_PARENT_TYPES:
+            raise RuntimeError(
+                f"Planning snapshot requires a Story parent, but item {story_id} is {parent_type!r}."
+            )
+        target_ids = client.new_direct_implementation_children(story_id)
+        source = {"kind": "story", "id": story_id}
+        parent_snapshot = _planning_item_snapshot(client, parent)
+    elif item_ids:
+        if len(set(item_ids)) != len(item_ids):
+            raise RuntimeError("Explicit planning item IDs must be unique.")
+        target_ids = item_ids
+        source = {"kind": "explicit", "ids": item_ids}
+        parent_snapshot = None
+    else:
+        raise RuntimeError("Specify either --story or one or more --id values.")
+
+    targets = []
+    for item_id in target_ids:
+        item = client.read(item_id)
+        item_type = item.get("fields", {}).get("System.WorkItemType")
+        item_state = item.get("fields", {}).get("System.State")
+        if story_id is not None and item_state != PLANNING_STATE:
+            raise RuntimeError(
+                f"Planning snapshot target {item_id} changed from New to {item_state!r}."
+            )
+        if item_type not in PLANNING_TYPES:
+            raise RuntimeError(
+                f"Explicit planning item {item_id} must be Task or Bug, but is {item_type!r}."
+            )
+        targets.append(_planning_item_snapshot(client, item))
+    emit({"source": source, "parent": parent_snapshot, "targets": targets})
 
 
 def preflight(args):
     """Emit the smallest source-of-truth snapshot needed to begin one work item."""
-    item = connect(args)[0].read(args.id)
+    client = connect(args)[0]
+    item = client.read(args.id)
     fields = item.get("fields", {})
+    comments = client.read_comments(args.id)
     emit({"id": item.get("id", args.id), "rev": item.get("rev"),
           "type": fields.get("System.WorkItemType"), "state": fields.get("System.State"),
           "title": fields.get("System.Title"),
-          "scope": _scope_summary(fields.get("System.Description", "")),
-          "relations": _relation_summary(item)})
+          "fields": fields, "multilineFieldsFormat": item.get("multilineFieldsFormat", {}),
+          "scope": _scope_summary(fields), "relations": _relation_summary(item),
+          "attachments": _attachments(item), "linkedReferences": _linked_references(item),
+          "comments": comments,
+          "discussion": {"comments": comments}})
 
 
 def show_item(args):
@@ -225,12 +388,45 @@ def relation(args, kind, target):
 def create(args):
     client, cls = connect(args); text = args.description_file.read_text(); iteration = args.iteration or sprint(args)
     document = [op(cls, "add", "/fields/System.Title", args.title), op(cls, "add", "/fields/System.Description", text), op(cls, "add", "/multilineFieldsFormat/System.Description", "markdown"), op(cls, "add", "/fields/System.IterationPath", iteration)]
+    expected_fields = {"System.IterationPath": iteration}
+    repro_steps_file = getattr(args, "repro_steps_file", None)
+    system_info_file = getattr(args, "system_info_file", None)
+    comment_file = getattr(args, "comment_file", None)
+    initial_comment = comment_file.read_text() if comment_file is not None else None
+    if initial_comment is not None and not initial_comment.strip():
+        raise RuntimeError("Comment must not be empty.")
+    if args.type != "Bug" and any(value is not None for value in (repro_steps_file, system_info_file)):
+        raise RuntimeError("Bug-specific fields require --type Bug.")
+    for option, field_name in (
+        ("repro_steps_file", "Microsoft.VSTS.TCM.ReproSteps"),
+        ("system_info_file", "Microsoft.VSTS.TCM.SystemInfo"),
+    ):
+        value_file = locals()[option]
+        if value_file is not None:
+            value = value_file.read_text()
+            if not value.strip():
+                raise RuntimeError(f"{field_name} must not be empty.")
+            document.append(op(cls, "add", f"/fields/{field_name}", value))
+            expected_fields[field_name] = value
+    if args.type == "Bug" and initial_comment is not None and repro_steps_file is None:
+        document.append(op(cls, "add", "/fields/Microsoft.VSTS.TCM.ReproSteps", initial_comment))
+        expected_fields["Microsoft.VSTS.TCM.ReproSteps"] = initial_comment
+        initial_comment = None
     if args.tags: document.append(op(cls, "add", "/fields/System.Tags", "; ".join(args.tags)))
     for kind in RELATIONS:
         for target in getattr(args, kind): document.append(op(cls, "add", "/relations/-", relation(args, kind, target)))
-    expectation = Expectation(fields={"System.IterationPath": iteration}, description=text)
+    expectation = Expectation(fields=expected_fields, description=text)
     result = safe_mutate(client=client, target=NewItem(args.type), document=document, expectation=expectation, apply=args.apply)
-    if result["mode"] == "validated": return emit({"mode": "validated", "type": args.type, "title": args.title, "iteration": iteration})
+    if result["mode"] == "validated":
+        output = {"mode": "validated", "type": args.type, "title": args.title, "iteration": iteration}
+        if initial_comment is not None:
+            output["comment"] = {"format": "markdown", "length": len(initial_comment)}
+        return emit(output)
+    if initial_comment is not None:
+        saved = client.add_comment(result["id"], initial_comment)
+        if saved is None or saved.get("format", "").lower() != "markdown" or html.unescape(saved.get("text", "")) != initial_comment:
+            raise RuntimeError("Markdown comment did not persist after work-item creation.")
+        result["commentId"] = _comment_id(saved)
     emit(result)
 
 
@@ -260,7 +456,7 @@ def add_comment(args):
     if not args.apply: return emit({"mode": "validated", "id": args.id, "format": "markdown", "length": len(text)})
     saved = client.add_comment(args.id, text)
     if saved is None or saved.get("format", "").lower() != "markdown" or html.unescape(saved.get("text", "")) != text: raise RuntimeError("Markdown comment did not persist.")
-    emit({"mode": "applied", "id": args.id, "commentId": saved.get("id")})
+    emit({"mode": "applied", "id": args.id, "commentId": _comment_id(saved)})
 
 
 def _checklist_marker(body):
@@ -342,7 +538,7 @@ def close_task(args):
     if saved is None or saved.get("format", "").lower() != "markdown" or html.unescape(saved.get("text", "")) != comment:
         raise RuntimeError("Markdown comment did not persist.")
     emit({"mode": "applied", "id": args.id, "rev": mutation.get("rev") if mutation else None,
-          "fields": fields, "commentId": saved.get("id")})
+          "fields": fields, "commentId": _comment_id(saved)})
 
 
 def connection(parser, team=False):
@@ -354,8 +550,9 @@ def parser():
     root = argparse.ArgumentParser(description=__doc__); commands = root.add_subparsers(required=True)
     current = commands.add_parser("current-sprint"); connection(current, True); current.set_defaults(run=lambda a: print(sprint(a)))
     show = commands.add_parser("show"); connection(show); show.add_argument("--id", type=int, required=True); show.add_argument("--full", action="store_true", help="emit the full Azure JSON"); show.set_defaults(run=show_item)
+    snapshot = commands.add_parser("planning-snapshot"); connection(snapshot); snapshot_ids = snapshot.add_mutually_exclusive_group(required=True); snapshot_ids.add_argument("--story", type=int); snapshot_ids.add_argument("--id", dest="item_ids", action="append", type=int, metavar="ID"); snapshot.set_defaults(run=planning_snapshot)
     preflight_p = commands.add_parser("implement-preflight"); connection(preflight_p); preflight_p.add_argument("--id", type=int, required=True); preflight_p.set_defaults(run=preflight)
-    create_p = commands.add_parser("create"); connection(create_p, True); create_p.add_argument("--apply", action="store_true"); create_p.add_argument("--type", choices=("Epic", "Feature", "User Story", "Task", "Bug"), required=True); create_p.add_argument("--title", required=True); create_p.add_argument("--description-file", type=Path, required=True); create_p.add_argument("--iteration"); create_p.add_argument("--tags", action="append", default=[])
+    create_p = commands.add_parser("create"); connection(create_p, True); create_p.add_argument("--apply", action="store_true"); create_p.add_argument("--type", choices=("Epic", "Feature", "User Story", "Task", "Bug"), required=True); create_p.add_argument("--title", required=True); create_p.add_argument("--description-file", type=Path, required=True); create_p.add_argument("--repro-steps-file", type=Path, help="Bug-only Markdown content for Microsoft.VSTS.TCM.ReproSteps"); create_p.add_argument("--system-info-file", type=Path, help="Bug-only Markdown content for Microsoft.VSTS.TCM.SystemInfo"); create_p.add_argument("--comment-file", type=Path, help="Optional initial Markdown comment; for a Bug without --repro-steps-file it becomes Markdown Repro Steps"); create_p.add_argument("--iteration"); create_p.add_argument("--tags", action="append", default=[])
     for kind in RELATIONS: create_p.add_argument(f"--{kind}", action="append", type=int, default=[])
     create_p.set_defaults(run=create)
     update_p = commands.add_parser("update"); connection(update_p); update_p.add_argument("--apply", action="store_true"); update_p.add_argument("--id", type=int, required=True); update_p.add_argument("--description-file", type=Path); update_p.add_argument("--state"); update_p.add_argument("--iteration"); update_p.set_defaults(run=update)

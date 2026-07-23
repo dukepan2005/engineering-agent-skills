@@ -30,15 +30,62 @@ without reading or changing code, Git state, or Azure Boards if no usable
 spawn primitive is available. Do not silently run the work item in the parent
 agent or fall back to the parent's profile.
 
+## Planning Snapshot — spawn task-boards-ops
+
+Before invoking `$task-model-planner`, the parent orchestrator must obtain one
+authoritative read-only snapshot through a direct `task-boards-ops` child. Do
+not ask the planner child to read Boards or to spawn another child.
+
+Spawn a child with `model=gpt-5.6-luna` and `reasoning_effort=low`. Give it the
+Story or explicit work-item set and this self-contained instruction:
+
+```text
+Use `$azure-devops-boards-skill` in its semantic `task-boards-ops` role. For a
+Story, run `planning-snapshot --story <story-id>` once. It must use the
+server-side query to select only direct New Task and Bug children, then return
+one JSON snapshot containing the Story and every selected target. Do not read a
+non-New child. For an explicit set, run
+`planning-snapshot --id <id> --id <id>` once for the requested Task/Bug set;
+preserve the supplied order and do not invent a parent. For every included item
+retain all fields, multiline formats, raw and
+normalized relations, attachments, linked references, full comments/discussion,
+and type-specific scope fields when Description is absent. Linked references
+are raw attachment/hyperlink relations, not specification document bodies; the
+parent must merge accepted linked specification documents from the upstream
+planning authority before invoking the planner. For Bugs, preserve fields such as `Microsoft.VSTS.TCM.ReproSteps` and
+`Microsoft.VSTS.TCM.SystemInfo` when they are populated, but do not discard
+their comments when those fields are empty: many ticket-creation flows put
+reproduction evidence in Discussion instead. `discussion.comments` comes from
+the paginated Comments API and is not a synonym for full revision history. Do
+not spawn another child or perform non-Boards work. Bug Repro Steps and System
+Info remain Markdown and must be returned without HTML conversion.
+```
+
+One Boards child may make the helper calls needed to build this single snapshot;
+never spawn one Boards child per ticket. Relations to excluded work items are
+dependency context only, not planner targets.
+
+If the snapshot child fails, returns incomplete data, or cannot spawn, stop
+before invoking the planner. The parent may use the Boards Skill's documented
+fallback only when the parent itself cannot spawn this direct Boards child.
+
 ## Build and Validate the Plan
 
-1. Use `$task-model-planner` for the Story or explicit work-item set. Treat its
-   report as read-only planning guidance, not tracker authority.
+1. Merge the planning snapshot with the accepted linked specification documents
+   from the upstream planning authority, preserving the original Boards JSON
+   and adding a `linkedSpecifications` collection with one
+   `{reference, material, content}` decision per raw linked reference. A
+   material specification must have non-empty full Markdown `content`. Then
+   pass that composite snapshot to
+   `$task-model-planner`. The planner is
+   read-only planning logic; it must not read Azure Boards or spawn a Boards
+   child. Treat its report as guidance, not tracker authority.
 2. Read `$task-model-planner`'s canonical execution-profile registry. Resolve
    every profile ID from that one registry; do not reproduce or override its
    mapping here.
-3. Do not omit or reject a target solely because its Azure type is not Task,
-   and do not require a type conversion before planning or delivery.
+3. Accept both Task and Bug targets in the snapshot. Reject an explicit target
+   of any other Azure type at the Boards snapshot boundary; do not convert its
+   type or silently substitute another item.
 4. Require a recommendation row and an execution-plan entry for every target
    work item, with each item appearing exactly once in each list.
 5. Accept only an exact profile ID from the canonical registry. Reject a report
@@ -86,6 +133,13 @@ Use `$azure-devops-boards-skill` in its semantic `task-boards-ops` role. Run
 `implement-preflight --id <id>` and return the JSON output unchanged. Do not
 perform any non-Boards work.
 ```
+
+The preflight JSON must retain all fields, multiline formats, attachments, and
+full comments/discussion in addition to the type-neutral scope summary; a Bug
+without `System.Description` is scoped from its type-specific fields (including
+Repro Steps/System Info when present) plus Discussion comments when those
+fields are empty. The optional full revision/update stream is not required for
+the planner's current-scope authority.
 
 Collect the preflight result. If the spawn fails or the agent returns an error
 (no such item, wrong state, blocked by a relation), stop immediately. Do not

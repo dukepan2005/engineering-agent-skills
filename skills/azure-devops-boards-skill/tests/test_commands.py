@@ -61,6 +61,41 @@ class CreateCommandTests(unittest.TestCase):
         self.assertEqual(out, {"mode": "applied", "id": 1000, "rev": 2})
         self.assertEqual(fake.applies, 1)
 
+    def test_bug_creation_persists_repro_steps_and_system_info_fields(self):
+        fake = FakeClient()
+        args = self._args(apply=True)
+        args.type = "Bug"
+        args.repro_steps_file = _file("## Reproduction\n\n1. Open the screen\n2. Observe the `crash`")
+        args.system_info_file = _file("**iOS 18.5**\n\n- iPhone 15")
+        out = _run(create, fake, args)
+        self.assertEqual(out["mode"], "applied")
+        stored = fake.read(out["id"])["fields"]
+        self.assertEqual(stored["Microsoft.VSTS.TCM.ReproSteps"], "## Reproduction\n\n1. Open the screen\n2. Observe the `crash`")
+        self.assertEqual(stored["Microsoft.VSTS.TCM.SystemInfo"], "**iOS 18.5**\n\n- iPhone 15")
+        self.assertNotIn("Microsoft.VSTS.TCM.ReproSteps", fake.read(out["id"])["multilineFieldsFormat"])
+        self.assertNotIn("Microsoft.VSTS.TCM.SystemInfo", fake.read(out["id"])["multilineFieldsFormat"])
+
+    def test_bug_creation_uses_initial_comment_as_repro_steps_when_field_is_absent(self):
+        fake = FakeClient()
+        args = self._args(apply=True)
+        args.type = "Bug"
+        args.comment_file = _file("## Reproduction\n\n1. Open the screen\n2. Observe the `crash`")
+        out = _run(create, fake, args)
+        stored = fake.read(out["id"])["fields"]
+        self.assertEqual(stored["Microsoft.VSTS.TCM.ReproSteps"], "## Reproduction\n\n1. Open the screen\n2. Observe the `crash`")
+        self.assertEqual(fake.comments, {})
+
+    def test_bug_creation_keeps_initial_comment_when_repro_steps_are_explicit(self):
+        fake = FakeClient()
+        args = self._args(apply=True)
+        args.type = "Bug"
+        args.repro_steps_file = _file("native repro steps")
+        args.comment_file = _file("additional triage context")
+        out = _run(create, fake, args)
+        stored = fake.read(out["id"])["fields"]
+        self.assertEqual(stored["Microsoft.VSTS.TCM.ReproSteps"], "native repro steps")
+        self.assertEqual(fake.comments[out["id"]][0]["text"], "additional triage context")
+
 
 class UpdateCommandTests(unittest.TestCase):
     def _args(self, apply, state="Active", iteration=None, description_file=None):

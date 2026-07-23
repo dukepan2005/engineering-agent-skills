@@ -11,7 +11,7 @@ its own triggering and runtime instructions.
 | [`azure-devops-boards-skill`](skills/azure-devops-boards-skill/) | Safely read and mutate Azure DevOps Boards work items through the locally authenticated Azure CLI. |
 | [`azure-task-implement`](skills/azure-task-implement/) | Implement code from a provided specification or ticket scope. |
 | `task-boards-ops` | Semantic role for a cheap Boards-only child (Haiku or gpt-5.6-luna, low reasoning). Claude Code may optionally provide the [named agent](.claude/agents/task-boards-ops.md). |
-| [`task-model-planner`](skills/task-model-planner/) | Recommend one named, lowest-reliable execution profile for each work item. |
+| [`task-model-planner`](skills/task-model-planner/) | Recommend one named, lowest-reliable execution profile from a parent-provided work-item snapshot and linked specification authority. |
 | [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver implementation-ready Azure Boards work items from a Story or an explicit item set: preflight via cheap agent, implement via named-profile agent, closeout via cheap agent. |
 
 ## Review Dependency
@@ -22,7 +22,8 @@ embedded workflow uses `$code-review` before committing, so the host must make
 that Skill available in the same catalog.
 
 The orchestrator also requires this repository's `$task-model-planner`,
-`$azure-task-implement`, and `$azure-devops-boards-skill`. It invokes
+`$azure-task-implement`, and `$azure-devops-boards-skill`. The parent
+orchestrator invokes
 dependencies by Skill name, stops when the host reports one unavailable, and
 never requires users to supply installation paths or paste Skill bodies.
 
@@ -74,7 +75,7 @@ and command examples.
 ### Azure Task delivery
 
 The orchestrator handles the full lifecycle of implementation-ready Azure
-Boards work items. It accepts either a Story, whose directly related child items
+Boards work items. It accepts either a Story, whose direct New Task and Bug child items
 it plans and delivers in dependency order, or an explicit item set, including a
 single Task or Bug. It delegates Azure Boards mechanical operations (preflight,
 closeout) to a cheap child in the semantic `task-boards-ops` role and code
@@ -84,13 +85,17 @@ implementation to a planner-specified agent:
 $azure-task-orchestrator AB#168
 ```
 
-It runs three sequential subagents per work item:
-1. **Preflight** (cheap model, low reasoning) — reads the Azure Boards work item
-   and returns a structured scope snapshot.
+It first reads one planning snapshot through a direct `task-boards-ops` child,
+then combines that Boards snapshot with any linked specification documents from
+the accepted planning authority before invoking the read-only planner. For each work item it
+runs three sequential subagents:
+1. **Preflight** (cheap model, low reasoning) — reads the current Azure Boards
+   item and returns a structured scope snapshot.
 2. **Implement** (planner-specified model) — follows `$azure-task-implement`'s
    direct code, test, review, and commit workflow.
-3. **Closeout** (cheap model, low reasoning) — posts the completion comment and
-   closes the work item with optimistic revision checking.
+3. **Closeout** (cheap model, low reasoning) — checks evidence-backed
+   Description checklist items, posts the completion comment, and closes the
+   work item with optimistic revision checking.
 
 Use `$azure-task-implement` whenever a specification or ticket scope is already
 available and only local implementation work is required. In the three-stage
@@ -111,11 +116,12 @@ work item and stops when one is unavailable.
 
 ### Task model planning
 
-Invoke the Skill to plan a Story or an explicit work-item set, including a
-single Task or Bug:
+Invoke the Skill with an authoritative parent-provided snapshot when a separate
+planning pass is needed. The snapshot must include linked specification
+documents when the work-item references require them:
 
 ```text
-$task-model-planner <Story-or-explicit-work-item-set>
+$task-model-planner <parent-provided-snapshot>
 ```
 
 It returns one cost-aware execution-profile ID per work item, plus evidence,
@@ -124,10 +130,10 @@ single mapping from profile ID to model and reasoning effort.
 
 ### Recommended delivery flow
 
-Always use the orchestrator for full lifecycle delivery:
+Use the orchestrator for full lifecycle delivery; it obtains the Boards
+snapshot before invoking the planner:
 
 ```text
-$task-model-planner <Story-or-explicit-work-item-set>
 $azure-task-orchestrator <Story-or-explicit-work-item-set>
 ```
 

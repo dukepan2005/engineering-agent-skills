@@ -38,12 +38,25 @@ Read the repository's tracker instructions before operating. Treat its work-item
 sh "$HELPER" current-sprint
 sh "$HELPER" show --id 61               # compact default (id/rev/type/state/title/relations)
 sh "$HELPER" show --id 61 --full        # raw Azure JSON
+sh "$HELPER" planning-snapshot --story 61 # Story + direct New Task/Bug targets only
+sh "$HELPER" planning-snapshot --id 123 --id 124 # explicit Task/Bug set, stable input order
 sh "$HELPER" implement-preflight --id 61
 
 sh "$HELPER" create \
   --type Task --title 'Implement contract' \
   --description-file /tmp/task.md --parent 61 \
   --tags ready-for-agent
+
+sh "$HELPER" create \
+  --type Bug --title 'Crash during planning' \
+  --description-file /tmp/bug.md \
+  --repro-steps-file /tmp/repro-steps.md \
+  --system-info-file /tmp/system-info.md
+
+sh "$HELPER" create \
+  --type Bug --title 'Crash during planning' \
+  --description-file /tmp/bug.md \
+  --comment-file /tmp/initial-repro.md
 
 sh "$HELPER" update \
   --id 123 --state Active --description-file /tmp/task.md
@@ -67,15 +80,56 @@ exactly one item — ambiguous fragments raise), and patches it back in the same
 mutation; it is mutually exclusive with `--description-file`. For
 `predecessor`, `--target-id` blocks the current `--id`. For `parent`, the target
 is the current item's parent. Re-adding an existing relation returns `unchanged`.
+When creating a Bug, pass reproduction and environment evidence through
+`--repro-steps-file` and `--system-info-file`; do not put those authoritative
+values only in a Discussion comment. If an initial `--comment-file` is supplied
+for a Bug and no `--repro-steps-file` is supplied, the helper treats that one
+creation-time payload as `Microsoft.VSTS.TCM.ReproSteps`. If Repro Steps are
+explicit, or if `add-comment` is used after creation, the payload remains a
+real Discussion comment. The Bug-specific flags are rejected for non-Bug work
+items. Use comments for supplemental context. Repro Steps and System Info files
+remain Markdown and are sent verbatim; the helper does not convert them to HTML
+or add Description's Markdown metadata to those fields.
 
 ## Keep implementation synchronization compact
 
+For Story planning, run `planning-snapshot --story` once. It validates the
+parent as a Story/User Story, then uses a server-side direct link query to
+select only the Story's direct `New` `Task` and `Bug` children; it does not read
+a non-New child. For an explicit set, repeat `--id` in one
+`planning-snapshot` call for each requested Task or Bug. It validates each type
+and preserves the supplied order without inventing a parent. The single JSON
+result includes the Story or explicit targets and
+each selected target's full fields, multiline formats, raw and normalized
+relations, attachment relations, linked references, complete comments/discussion,
+and a scope summary. An empty Description falls back to type-specific fields, which is
+required for Bugs that record repro data outside `System.Description`, such as
+`Microsoft.VSTS.TCM.ReproSteps`, `Microsoft.VSTS.TCM.SystemInfo`, and (when
+present) `Microsoft.VSTS.TCM.FoundInBuild` or acceptance/severity fields. If
+those fields are empty, the complete Discussion comments remain authoritative
+context; ticket creation must not hide that context behind a comment-only
+summary.
+`discussion.comments` is the paginated Work Item Comments API result. It is
+separate from the optional full revision/update history; the latter is not
+needed to determine the current planning scope.
+
+`linkedReferences` contains raw attachment or hyperlink relations only. It does
+not claim to contain specification documents. The parent orchestrator must
+preserve that raw list and add one `linkedSpecifications` decision per raw
+reference: `{reference, material, content}`. A material decision requires
+non-empty full Markdown content; an unmatched reference or missing material
+content means the planner must return `Input not ready`. The parent must not
+infer specification content from a URL or relation metadata.
+
 For one implementation-ready work item, run `implement-preflight` once before
-editing. It returns a compact snapshot of the revision, type, state, title,
-structured acceptance criteria (or the full Description when it cannot safely
-extract them), and relation IDs. Keep it as the scope authority for the current
-thread. Re-run only after an item, branch, or session change, or when a scope
-conflict appears.
+editing. It returns the revision, type, state, title, all fields, multiline
+formats, comments/discussion, attachments, relations, and a type-neutral scope
+summary. For a Bug, inspect the complete `fields` map and
+`scope.knownBugFields`; do not assume `System.Description` or those known
+fields are populated. Use `discussion.comments` as the fallback source when
+the ticket creator put the reproduction evidence there. Keep it as the scope
+authority for the current thread. Re-run only
+after an item, branch, or session change, or when a scope conflict appears.
 
 At closeout, run `close-task` once with `--apply`, passing the preflight `rev`
 as `--expected-rev` — the invariants above apply unchanged (one call, fail-fast
@@ -84,3 +138,14 @@ terminal state, and one Markdown completion comment; it verifies both persisted
 results, and the two Azure operations are not atomic.
 
 Read [azure-boards-api.md](azure-boards-api.md) only when endpoint behavior or relation semantics need investigation.
+
+For planning snapshots, the field/discussion boundary follows the Microsoft
+documentation: [Work Items - Get Work Item](https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/work-items/get-work-item?view=azure-devops-rest-7.1)
+returns the current `fields` and `relations`, [Comments - Get
+Comments](https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/comments/get-comments?view=azure-devops-rest-7.1)
+returns paginated Discussion comments, and [Define, capture, triage, and
+manage bugs](https://learn.microsoft.com/en-us/azure/devops/boards/backlogs/manage-bugs?view=azure-devops)
+documents Bug-specific Repro Steps, System Info, and Found in Build fields.
+The [Revisions - List](https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/revisions/list?view=azure-devops-rest-7.1)
+and Updates APIs are historical change streams, not a replacement for the
+current fields plus Discussion comments used by the planner.

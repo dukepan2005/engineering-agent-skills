@@ -84,6 +84,28 @@ class FakeClient:
     def read(self, item_id):
         return copy.deepcopy(self.items[item_id])
 
+    def read_comments(self, work_item_id):
+        return copy.deepcopy(self.comments.get(work_item_id, []))
+
+    def new_direct_implementation_children(self, story_id):
+        children = []
+        seen = set()
+        for relation in self.items[story_id].get("relations", []):
+            if relation.get("rel") != "System.LinkTypes.Hierarchy-Forward":
+                continue
+            target = relation.get("url", "").rsplit("/", 1)[-1]
+            if not target.isdigit():
+                continue
+            item = self.items[int(target)]
+            fields = item.get("fields", {})
+            target_id = int(target)
+            if (fields.get("System.State") == "New"
+                    and fields.get("System.WorkItemType") in ("Task", "Bug")
+                    and target_id not in seen):
+                seen.add(target_id)
+                children.append(target_id)
+        return children
+
     def add_comment(self, work_item_id, text):
         comment_id = self._next_comment; self._next_comment += 1
         saved = {"id": comment_id, "format": "markdown", "text": html.escape(text, quote=False)}
