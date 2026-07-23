@@ -16,9 +16,14 @@ agent reads.
 When the current prompt does **not** assign the semantic `task-boards-ops`
 role, your first action on an Azure Boards request is to spawn one isolated
 child and assign that role. On Codex, use
-`model=gpt-5.6-luna` and `reasoning_effort=low`. On Claude Code, use Haiku with
-low reasoning. A host may use a named `task-boards-ops` agent when available,
-but named-agent configuration is not required.
+`model=gpt-5.6-luna` and `reasoning_effort=low`. On Claude Code, use
+`agent(prompt, {model: 'haiku', effort: 'low'})` inside a `Workflow` script;
+the bare `Agent` tool cannot set `effort` explicitly. If the caller is itself
+already running inside a `Workflow` script (for example, when the
+`$azure-task-orchestrator` is in the post-confirmation delivery loop on Claude
+Code), make this call from within that same script rather than opening a
+second one. A host may use a named `task-boards-ops` agent when available, but
+named-agent configuration is not required.
 
 The spawn instruction must be self-contained. Tell the child to use
 `$azure-devops-boards-skill` in the semantic role and name the exact operation

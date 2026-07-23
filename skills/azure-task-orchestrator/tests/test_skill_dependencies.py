@@ -101,6 +101,69 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("`model=gpt-5.6-luna`", text)
         self.assertIn("`reasoning_effort=low`", text)
 
+    def test_orchestrator_spawns_claude_code_children_through_workflow(self) -> None:
+        text = self.read_skill("azure-task-orchestrator")
+
+        self.assertIn(
+            "the bare `Agent` tool cannot set reasoning\neffort explicitly",
+            text,
+        )
+        self.assertIn("agent(prompt, {model: 'haiku', effort: 'low'})", text)
+        self.assertIn("agent(prompt,\n{model, effort, label})`", text)
+        self.assertIn("Claude Code has no pre-start capacity", text)
+
+        # A Workflow script has no pause point for user input, so it must not
+        # be asked to span the pre-confirmation planning steps: only the
+        # post-confirmation per-item delivery loop may run inside one.
+        self.assertIn("no pause point for user input", text)
+        self.assertIn(
+            "single `Workflow` script invoked once after the user confirms the plan",
+            text,
+        )
+        self.assertNotIn(
+            "run the entire delivery sequence — planning snapshot,\n"
+            "preflight, implement, closeout — as one `Workflow` script",
+            text,
+        )
+
+    def test_boards_skill_routes_claude_code_child_through_workflow(self) -> None:
+        text = self.read_skill("azure-devops-boards-skill")
+
+        self.assertIn("agent(prompt, {model: 'haiku', effort: 'low'})", text)
+        self.assertIn("inside a `Workflow` script", text)
+
+    def test_execution_profile_registry_has_per_host_tables(self) -> None:
+        text = (
+            REPO_ROOT
+            / "skills"
+            / "task-model-planner"
+            / "references"
+            / "execution-profiles.md"
+        ).read_text()
+
+        self.assertIn("## Codex", text)
+        self.assertIn("## Claude Code", text)
+        self.assertIn("| `terra-medium` | `sonnet` | `medium` |", text)
+        self.assertIn("| `sol-high` | `opus` | `high` |", text)
+        self.assertIn("| `sol-xhigh` | `fable` | `xhigh` |", text)
+        self.assertIn("no pre-start capacity error signal", text)
+
+    def test_confirm_plan_and_report_distinguish_fallback_by_host(self) -> None:
+        text = self.read_skill("azure-task-orchestrator")
+
+        # Confirm the Validated Plan section must clarify that Claude Code
+        # omits the fallback column since it has no pre-start capacity signal.
+        self.assertIn(
+            "On Codex, also include\nthe pre-start capacity fallback profile if any; Claude Code has no such\nfallback, so omit that column there.",
+            text,
+        )
+
+        # Report section must also clarify fallback is Codex-only.
+        self.assertIn(
+            "any pre-start capacity fallback error\n(Codex only)",
+            text,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

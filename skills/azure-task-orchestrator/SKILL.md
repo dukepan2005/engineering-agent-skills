@@ -24,11 +24,23 @@ reasoning effort. Boards children use the semantic `task-boards-ops` role
 defined by `$azure-devops-boards-skill`; no named-agent configuration is
 required.
 
-On Codex, use `spawn_agent` with `model` and `reasoning_effort`. On another
-host, use its equivalent only when it can set both values for each child. Stop
-without reading or changing code, Git state, or Azure Boards if no usable
-spawn primitive is available. Do not silently run the work item in the parent
-agent or fall back to the parent's profile.
+On Codex, use `spawn_agent` with `model` and `reasoning_effort` for every
+profiled child. On Claude Code, the bare `Agent` tool cannot set reasoning
+effort explicitly, so a profiled child must be spawned through a `Workflow`
+script's `agent(prompt, {model, effort})` call instead. A `Workflow` script
+runs as one asynchronous unit with no pause point for user input, so it can
+only wrap steps that run after the user's plan confirmation: the per-item
+preflight/implement/closeout loop in **Deliver Sequentially**. The planning
+snapshot and the planner call happen before that confirmation and must stay in
+the main conversation loop so the parent can inspect each result and pause for
+confirmation before continuing. On Claude Code, the snapshot child is a spawn,
+so it uses a single-child `Workflow` call with exactly one `agent()` inside it
+(or the host's single-child-spawn equivalent); the planner is invoked as a
+Skill in the current context, not as a spawned child. On
+another host, use its equivalent only when it can set both values for each
+child. Stop without reading or changing code, Git state, or Azure Boards if no
+usable spawn primitive is available. Do not silently run the work item in the
+parent agent or fall back to the parent's profile.
 
 ## Planning Snapshot — spawn task-boards-ops
 
@@ -36,8 +48,13 @@ Before invoking `$task-model-planner`, the parent orchestrator must obtain one
 authoritative read-only snapshot through a direct `task-boards-ops` child. Do
 not ask the planner child to read Boards or to spawn another child.
 
-Spawn a child with `model=gpt-5.6-luna` and `reasoning_effort=low`. Give it the
-Story or explicit work-item set and this self-contained instruction:
+Spawn a child with `model=gpt-5.6-luna` and `reasoning_effort=low` on Codex, or
+on Claude Code, one `Workflow` call whose script makes exactly one
+`agent(prompt, {model: 'haiku', effort: 'low'})` call. This snapshot step runs
+in the main loop, before the user confirms the plan, so use a single-child
+`Workflow` call here rather than folding it into the per-item delivery
+`Workflow` described in **Deliver Sequentially**. Give it the Story or explicit
+work-item set and this self-contained instruction:
 
 ```text
 Use `$azure-devops-boards-skill` in its semantic `task-boards-ops` role. For a
@@ -103,8 +120,9 @@ fallback only when the parent itself cannot spawn this direct Boards child.
 
 Before spawning any worker, present the complete validated plan in its planned
 order. For every work item, include its ID, type, title, planned profile ID,
-resolved model and reasoning effort, pre-start capacity fallback if any, and
-order reason.
+resolved model and reasoning effort, and order reason. On Codex, also include
+the pre-start capacity fallback profile if any; Claude Code has no such
+fallback, so omit that column there.
 State that confirmation authorizes sequential delivery, including code changes,
 one commit per successful work item, and Azure Boards closeout.
 
@@ -124,9 +142,18 @@ For each work item in the validated execution plan, run three sequential steps.
 Only one work item at a time. Do not start the next work item until the current
 one is complete.
 
+On Claude Code, this entire loop — every work item's preflight, implement, and
+closeout step, for every item in the validated plan — runs as the body of a
+single `Workflow` script invoked once after the user confirms the plan. Do not
+open a new `Workflow` call per step or per item; call `agent()` sequentially
+inside that one script so each item's three steps complete, in order, before
+the next item's steps begin. No user input is needed once this script starts,
+since confirmation already happened in the main loop before it was invoked.
+
 ### 1. Preflight — spawn cheap agent
 
-Spawn an agent with `model=gpt-5.6-luna` and `reasoning_effort=low`. Give it the
+Spawn an agent with `model=gpt-5.6-luna` and `reasoning_effort=low` on Codex,
+or `agent(prompt, {model: 'haiku', effort: 'low'})` on Claude Code. Give it the
 work-item ID and this self-contained instruction:
 
 ```text
@@ -148,20 +175,26 @@ proceed to the implement step.
 
 ### 2. Implement — spawn planner-specified agent
 
-Resolve the work item's planned profile ID through the canonical registry. On
-Codex, call `spawn_agent` with its exact `model` and `reasoning_effort`, and
-a normalized `task_name` containing the work-item ID and planned profile, for
-example `delivery_sol_xhigh_ab_175`. The name is only a task label; it does
-not select a custom agent configuration.
+Resolve the work item's planned profile ID through the canonical registry for
+the current host (Codex or Claude Code). On Codex, call `spawn_agent` with its
+exact `model` and `reasoning_effort`, and a normalized `task_name` containing
+the work-item ID and planned profile, for example `delivery_sol_xhigh_ab_175`.
+The name is only a task label; it does not select a custom agent
+configuration. On Claude Code, call the `Workflow` script's `agent(prompt,
+{model, effort, label})` with the profile's exact Claude Code `model`/`effort`
+mapping, and a `label` containing the work-item ID and planned profile.
 
 If the host rejects that spawn before the worker starts and explicitly reports
 the requested reasoning effort or capacity as unavailable, read the planned
-profile's `Pre-start capacity fallback` from the canonical registry. When it
-has a value, retry exactly once with that profile's exact mapping and a new
-`task_name`. Record both profile IDs and the host error. If it has no value,
-the error is model-wide availability, the error is not recognizable, or the
-retry fails, stop the sequence. Do not retry after a worker begins, across
-models, or for a work-item-level failure.
+profile's `Pre-start capacity fallback` from the canonical registry. This
+fallback column exists for Codex only; Claude Code has no pre-start capacity
+error signal, so on Claude Code any such rejection stops the sequence
+immediately with no retry. On Codex, when the fallback has a value, retry
+exactly once with that profile's exact mapping and a new `task_name`. Record
+both profile IDs and the host error. If it has no value, the error is
+model-wide availability, the error is not recognizable, or the retry fails,
+stop the sequence. Do not retry after a worker begins, across models, or for a
+work-item-level failure.
 
 Give the worker its work-item ID and type, planned profile ID, effective
 profile ID, relevant planner evidence and order reason, and the preflight scope
@@ -190,7 +223,8 @@ immediately. Do not dispatch later work items.
 
 ### 3. Closeout — spawn cheap agent
 
-Spawn an agent with `model=gpt-5.6-luna` and `reasoning_effort=low`.
+Spawn an agent with `model=gpt-5.6-luna` and `reasoning_effort=low` on Codex,
+or `agent(prompt, {model: 'haiku', effort: 'low'})` on Claude Code.
 
 Closeout policy (apply before spawning):
 - Read the current full Description and preserve its non-checklist content and
@@ -239,8 +273,8 @@ Dispatch the next work item only after all three steps complete successfully.
 ## Report
 
 Return one ordered summary. For every completed work item, include the planned
-and effective execution profile IDs, any pre-start capacity fallback error,
-worker-reported commit and verification, final tracker state, and closeout
-result. For a stopped run, identify the work item that stopped the sequence,
-retain earlier completed results, and state that later work items were not
-dispatched.
+and effective execution profile IDs, any pre-start capacity fallback error
+(Codex only), worker-reported commit and verification, final tracker state,
+and closeout result. For a stopped run, identify the work item that stopped
+the sequence, retain earlier completed results, and state that later work
+items were not dispatched.
