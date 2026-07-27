@@ -2,7 +2,8 @@
 
 Reusable, host-neutral agent skills for reliable software delivery. The skills
 work with compatible hosts such as Codex and Claude Code; each skill defines
-its own triggering and runtime instructions.
+its own triggering and runtime instructions. Supported host examples include
+Codex, Claude Code, and Cursor.
 
 ## Catalog
 
@@ -10,7 +11,7 @@ its own triggering and runtime instructions.
 |---|---|
 | [`azure-devops-boards-skill`](skills/azure-devops-boards-skill/) | Safely read and mutate Azure DevOps Boards work items through the locally authenticated Azure CLI. |
 | [`azure-task-implement`](skills/azure-task-implement/) | Implement code from a provided specification or ticket scope. |
-| `task-boards-ops` | Semantic role for a cheap Boards-only child (Haiku or gpt-5.6-luna, low reasoning). Claude Code may optionally provide the [named agent](.claude/agents/task-boards-ops.md). |
+| `task-boards-ops` | Semantic role for a cheap Boards-only child: prefer an available Luna model, then a lightweight fallback such as Terra low; in Cursor, use the available lightweight Composer model or equivalent. Claude Code may optionally provide the [named agent](.claude/agents/task-boards-ops.md). |
 | [`task-model-planner`](skills/task-model-planner/) | Recommend one named, lowest-reliable execution profile from a parent-provided work-item snapshot and linked specification authority. |
 | [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver implementation-ready Azure Boards work items from a Story or an explicit item set: preflight via cheap agent, implement via named-profile agent, closeout via cheap agent. |
 

@@ -94,11 +94,17 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("--comment-file <tmpcomment>", text)
         self.assertNotIn("never pass `--check-ac` or `--description-file`", text)
 
-    def test_boards_role_is_semantic_on_codex(self) -> None:
+    def test_boards_role_is_semantic_across_hosts(self) -> None:
         text = self.read_skill("azure-devops-boards-skill")
 
         self.assertIn("semantic `task-boards-ops` role", text)
-        self.assertIn("`model=gpt-5.6-luna`", text)
+        self.assertIn("prefer the currently available Luna", text)
+        self.assertIn("if Luna is unavailable", text)
+        self.assertIn("lightweight model, such as Terra with low reasoning", text)
+        self.assertIn("On Cursor", text)
+        self.assertIn("lightweight Composer model", text)
+        self.assertRegex(text, r"Do not require a\s+specific Composer model ID")
+        self.assertNotRegex(text, r"`model=[^`]+`")
         self.assertIn("`reasoning_effort=low`", text)
 
     def test_orchestrator_spawns_claude_code_children_through_workflow(self) -> None:
@@ -143,9 +149,18 @@ class SkillDependencyContractTests(unittest.TestCase):
 
         self.assertIn("## Codex", text)
         self.assertIn("## Claude Code", text)
+        self.assertIn("## Cursor", text)
         self.assertIn("| `terra-medium` | `sonnet` | `medium` |", text)
-        self.assertIn("| `sol-high` | `opus` | `high` |", text)
-        self.assertIn("| `sol-xhigh` | `fable` | `xhigh` |", text)
+        self.assertIn("| `sol-high` | `claude-opus-5` | `high` |", text)
+        self.assertIn("| `sol-xhigh` | `claude-opus-5` | `xhigh` |", text)
+        self.assertIn("Cursor resolves the regular profiles to `grok4.5 high`", text)
+        self.assertIn("`claude-opus-5 high` and `claude-opus-5 xhigh`", text)
+        self.assertRegex(text, r"does not preserve the\s+profile's separate reasoning-effort semantics")
+        self.assertIn("| `terra-medium` | `grok4.5 high` |", text)
+        self.assertIn("| `terra-high` | `grok4.5 high` |", text)
+        self.assertIn("| `sol-medium` | `grok4.5 high` |", text)
+        self.assertIn("| `sol-high` | `claude-opus-5 high` |", text)
+        self.assertIn("| `sol-xhigh` | `claude-opus-5 xhigh` |", text)
         self.assertIn("no pre-start capacity error signal", text)
 
     def test_confirm_plan_and_report_distinguish_fallback_by_host(self) -> None:
@@ -181,7 +196,8 @@ class SkillDependencyContractTests(unittest.TestCase):
         # Verify PROFILES registry matches execution-profiles.md
         self.assertIn("const PROFILES = {", script_text)
         self.assertIn("'terra-medium': { model: 'sonnet', effort: 'medium' }", script_text)
-        self.assertIn("'sol-xhigh': { model: 'fable', effort: 'xhigh' }", script_text)
+        self.assertIn("'sol-high': { model: 'claude-opus-5', effort: 'high' }", script_text)
+        self.assertIn("'sol-xhigh': { model: 'claude-opus-5', effort: 'xhigh' }", script_text)
 
         # Verify core agent() calls for three steps
         self.assertIn("agent(", script_text)

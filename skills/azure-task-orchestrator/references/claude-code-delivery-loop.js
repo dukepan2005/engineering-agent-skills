@@ -46,8 +46,8 @@ const PROFILES = {
   'terra-high': { model: 'sonnet', effort: 'high' },
   'terra-xhigh': { model: 'sonnet', effort: 'xhigh' },
   'sol-medium': { model: 'opus', effort: 'medium' },
-  'sol-high': { model: 'opus', effort: 'high' },
-  'sol-xhigh': { model: 'fable', effort: 'xhigh' },
+  'sol-high': { model: 'claude-opus-5', effort: 'high' },
+  'sol-xhigh': { model: 'claude-opus-5', effort: 'xhigh' },
 }
 
 // Resolve profile ID to model + effort

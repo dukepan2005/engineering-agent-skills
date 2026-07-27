@@ -115,7 +115,9 @@ For each ready work item, assess only source-backed evidence:
 
 Read [the canonical execution-profile registry](references/execution-profiles.md)
 before selecting a profile. Output only its profile ID; do not output a free-form
-model and thinking-level pair.
+model and thinking-level pair. The registry resolves that profile separately for
+Codex, Claude Code, and Cursor; do not infer a host-specific model from the
+profile name.
 
 Choose the model family and reasoning effort independently. Use these four
 profiles for regular planning:

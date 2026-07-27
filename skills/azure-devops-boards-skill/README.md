@@ -1,6 +1,6 @@
 # Azure DevOps Boards Skill
 
-An [Agent Skills](https://agentskills.io/) package for safely managing Azure DevOps Boards work items from Codex, Claude Code, and other compatible agent hosts.
+An [Agent Skills](https://agentskills.io/) package for safely managing Azure DevOps Boards work items from Codex, Claude Code, Cursor, and other compatible agent hosts.
 
 It provides a shared, project-neutral implementation for:
 
@@ -146,7 +146,7 @@ no automatic retry.
 
 ## Workflow integration
 
-The Skill description explicitly covers `/to-spec`, `/to-tickets`, `/implement`, and other workflows that publish or update Azure DevOps work items. For deterministic routing, projects should also state in their `AGENTS.md` (Codex) or `CLAUDE.md` (Claude Code) instructions that Azure Boards operations must use this Skill instead of reimplementing REST, CLI, or SDK orchestration.
+The Skill description explicitly covers `/to-spec`, `/to-tickets`, `/implement`, and other workflows that publish or update Azure DevOps work items. For deterministic routing, projects should also state in their `AGENTS.md` (Codex), `CLAUDE.md` (Claude Code), or Cursor project rules that Azure Boards operations must use this Skill instead of reimplementing REST, CLI, or SDK orchestration.
 
 ## Scope
 

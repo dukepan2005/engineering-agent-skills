@@ -4,9 +4,10 @@ This registry is the canonical mapping from a planner output to the exact child
 agent configuration. Use only these IDs. Do not override a mapped value in a
 planner report or orchestrator dispatch.
 
-Resolve the model and reasoning effort per host. The profile ID is the only
+Resolve the model or host configuration per host. The profile ID is the only
 value the planner and orchestrator exchange; each host resolves it into its
-own model/effort pair only when spawning the child agent.
+own model/effort pair or combined model configuration only when spawning the
+child agent.
 
 ## Codex
 
@@ -39,22 +40,40 @@ orchestrator stops the run instead of retrying with a substitute profile.
 | `terra-high` | `sonnet` | `high` |
 | `terra-xhigh` | `sonnet` | `xhigh` |
 | `sol-medium` | `opus` | `medium` |
-| `sol-high` | `opus` | `high` |
-| `sol-xhigh` | `fable` | `xhigh` |
+| `sol-high` | `claude-opus-5` | `high` |
+| `sol-xhigh` | `claude-opus-5` | `xhigh` |
 
-Claude Code's `terra` family uses `sonnet` (cost-optimized reasoning), `sol-medium`
-and `sol-high` use `opus` (stronger judgment). `sol-xhigh` escalates to `fable`
-(latest, most capable tier) because this profile is reserved for cases where
-deep reasoning, high-consequence judgment, and weaker verification converge —
-situations where Codex's second-highest reasoning level (`gpt-5.6-sol`) is not
-sufficient. On Claude Code, `fable` is the semantic equivalent of this
-severity level.
+Claude Code's `terra` family uses `sonnet` (cost-optimized reasoning),
+`sol-medium` uses `opus`, and `sol-high` uses `claude-opus-5` (stronger
+judgment). `sol-xhigh` also uses `claude-opus-5` at `xhigh` effort because this
+profile is reserved for cases where deep reasoning, high-consequence judgment,
+and weaker verification converge — situations where Codex's second-highest
+reasoning level (`gpt-5.6-sol`) is not sufficient.
 
 `model` and `effort` here are exactly the `opts.model` and `opts.effort`
 fields of a `Workflow` script's `agent()` call. The bare `Agent` tool cannot
 set `effort` explicitly, so every profiled child on Claude Code must be
 spawned through a `Workflow` script's `agent()` call, not through the `Agent`
 tool directly.
+
+## Cursor
+
+Cursor resolves the regular profiles to `grok4.5 high`. The two exceptional
+high-reasoning profiles use Cursor's `claude-opus-5 high` and `claude-opus-5 xhigh`
+configurations. The Cursor mapping intentionally does not preserve the
+profile's separate reasoning-effort semantics; the profile ID remains planner
+metadata only. If Cursor exposes a different current label for these
+configurations, use that host-provided label without changing the profile ID.
+Do not silently replace an unavailable profile with a different profile.
+
+| Profile ID | Cursor configuration |
+|---|---|
+| `terra-medium` | `grok4.5 high` |
+| `terra-high` | `grok4.5 high` |
+| `terra-xhigh` | `grok4.5 high` |
+| `sol-medium` | `grok4.5 high` |
+| `sol-high` | `claude-opus-5 high` |
+| `sol-xhigh` | `claude-opus-5 xhigh` |
 
 ## Shared escalation order
 

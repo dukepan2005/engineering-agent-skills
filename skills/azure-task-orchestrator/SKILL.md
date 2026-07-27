@@ -48,8 +48,11 @@ Before invoking `$task-model-planner`, the parent orchestrator must obtain one
 authoritative read-only snapshot through a direct `task-boards-ops` child. Do
 not ask the planner child to read Boards or to spawn another child.
 
-Spawn a child with `model=gpt-5.6-luna` and `reasoning_effort=low` on Codex, or
-on Claude Code, one `Workflow` call whose script makes exactly one
+On Codex, prefer the currently available Luna model with
+`reasoning_effort=low`; if Luna is unavailable, use the currently available
+lightweight model, such as Terra with low reasoning. Do not treat a specific
+model ID as a universal requirement. On Claude Code, use one `Workflow` call
+whose script makes exactly one
 `agent(prompt, {model: 'haiku', effort: 'low'})` call. This snapshot step runs
 in the main loop, before the user confirms the plan, so use a single-child
 `Workflow` call here rather than folding it into the per-item delivery
@@ -157,8 +160,11 @@ report with completion status for each work item.
 
 ### 1. Preflight — spawn cheap agent
 
-Spawn an agent with `model=gpt-5.6-luna` and `reasoning_effort=low` on Codex,
-or `agent(prompt, {model: 'haiku', effort: 'low'})` on Claude Code. Give it the
+On Codex, prefer the currently available Luna model with
+`reasoning_effort=low`; if Luna is unavailable, use the currently available
+lightweight model, such as Terra with low reasoning. Do not treat a specific
+model ID as a universal requirement. On Claude Code, use
+`agent(prompt, {model: 'haiku', effort: 'low'})`. Give it the
 work-item ID and this self-contained instruction:
 
 ```text
@@ -228,8 +234,11 @@ immediately. Do not dispatch later work items.
 
 ### 3. Closeout — spawn cheap agent
 
-Spawn an agent with `model=gpt-5.6-luna` and `reasoning_effort=low` on Codex,
-or `agent(prompt, {model: 'haiku', effort: 'low'})` on Claude Code.
+On Codex, prefer the currently available Luna model with
+`reasoning_effort=low`; if Luna is unavailable, use the currently available
+lightweight model, such as Terra with low reasoning. Do not treat a specific
+model ID as a universal requirement. On Claude Code, use
+`agent(prompt, {model: 'haiku', effort: 'low'})`.
 
 Closeout policy (apply before spawning):
 - Read the current full Description and preserve its non-checklist content and
