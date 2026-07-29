@@ -298,6 +298,16 @@ class CloseTaskCheckAcTests(unittest.TestCase):
         })
         return fake
 
+    def _seeded_without_description_projection(self):
+        fake = FakeClient.with_item(
+            self.ID, rev=3, echo_description_on_existing_validate=False,
+        )
+        fake.items[self.ID]["fields"].update({
+            "System.Title": "T", "System.State": "Active",
+            "System.Description": "- [ ] Write tests\n- [ ] Ship it\n- [x] Hold scope",
+        })
+        return fake
+
     def _args(self, apply, check_ac, expected_rev=3, state="Closed"):
         return SimpleNamespace(organization=ORG, project=PROJECT, id=self.ID, apply=apply,
                                expected_rev=expected_rev, state=state,
@@ -312,6 +322,27 @@ class CloseTaskCheckAcTests(unittest.TestCase):
         out = _run(close_task, fake, self._args(apply=True, check_ac="all"))
         self.assertEqual(out["mode"], "applied")
         self.assertEqual(self._description(fake), "- [x] Write tests\n- [x] Ship it\n- [x] Hold scope")
+
+    def test_close_task_applies_when_validation_omits_description_projection(self):
+        fake = self._seeded_without_description_projection()
+        out = _run(close_task, fake, self._args(apply=True, check_ac="all"))
+        self.assertEqual(out, {"mode": "applied", "id": self.ID, "rev": 4,
+                               "fields": {"System.State": "Closed"}, "commentId": 1})
+        self.assertEqual(fake.validate_calls, 1)
+        self.assertEqual(fake.applies, 1)
+        stored = fake.read(self.ID)
+        self.assertEqual(html.unescape(stored["fields"]["System.Description"]),
+                         "- [x] Write tests\n- [x] Ship it\n- [x] Hold scope")
+        self.assertEqual(stored["multilineFieldsFormat"]["System.Description"], "markdown")
+        self.assertEqual(len(fake.comments[self.ID]), 1)
+
+    def test_stale_revision_with_omitted_description_prevents_patch_and_comment(self):
+        fake = self._seeded_without_description_projection()
+        with self.assertRaises(RuntimeError):
+            _run(close_task, fake, self._args(apply=True, check_ac="all", expected_rev=2))
+        self.assertEqual(fake.validate_calls, 1)
+        self.assertEqual(fake.applies, 0)
+        self.assertEqual(fake.comments, {})
 
     def test_check_ac_fragment_checks_single_match_case_insensitively(self):
         fake = self._seeded()

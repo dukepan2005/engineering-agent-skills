@@ -350,8 +350,14 @@ def show_item(args):
           "title": fields.get("System.Title"), "relations": _relation_summary(item)})
 
 
-def _evaluate(item, expectation, phase, *, check_relation=True):
-    if expectation.description is not None: assert_description(item, expectation.description)
+def _evaluate(item, expectation, phase, *, check_relation=True, check_description=True):
+    if check_description and expectation.description is not None:
+        try:
+            assert_description(item, expectation.description)
+        except RuntimeError:
+            if phase == "Validation":
+                raise RuntimeError("Validation failed for Description or Markdown metadata.") from None
+            raise
     fields = item.get("fields", {})
     for field, value in expectation.fields.items():
         actual = fields.get(field)
@@ -370,15 +376,17 @@ def _evaluate(item, expectation, phase, *, check_relation=True):
 def safe_mutate(*, client, target, document, expectation, apply):
     """The safe-mutation lifecycle: validate → check → apply → read-back → check.
 
-    Returns ``{mode, id?, rev?}``; never prints. Fields and descriptions are checked
-    against the validated item. Existing-item relations are checked against
-    persisted read-back because Azure update validation can omit them. A stale
-    ``/rev`` test (the item changed since it was read) surfaces immediately —
-    the caller must re-read and reconcile before retrying.
+    Returns ``{mode, id?, rev?}``; never prints. Fields are checked against the
+    validated item. Existing-item descriptions and relations are checked only
+    against persisted read-back because Azure update validation can omit their
+    projections; new-item validation still checks every expectation. A stale
+    ``/rev`` test (the item changed since it was read) surfaces immediately — the
+    caller must re-read and reconcile before retrying.
     """
     checked = client.validate(document, target)
     _evaluate(checked, expectation, "Validation",
-              check_relation=not isinstance(target, ExistingItem))
+              check_relation=not isinstance(target, ExistingItem),
+              check_description=not isinstance(target, ExistingItem))
     if not apply: return {"mode": "validated"}
     new_id = client.apply(document, target)
     saved = client.read(new_id)
