@@ -196,6 +196,32 @@ class UpdateCommandTests(unittest.TestCase):
         self.assertEqual(stored["Microsoft.VSTS.TCM.SystemInfo"],
                          "<ul>\n<li>macOS</li>\n</ul>")
 
+    def test_bug_fields_accept_azure_attribute_quote_normalization(self):
+        class AzureHtmlNormalizer(FakeClient):
+            @staticmethod
+            def _normalize(item):
+                for field in ("Microsoft.VSTS.TCM.ReproSteps", "Microsoft.VSTS.TCM.SystemInfo"):
+                    value = item["fields"].get(field)
+                    if isinstance(value, str):
+                        item["fields"][field] = (value.replace('class="language-sh"', "class=language-sh")
+                                                          .replace('start="4"', "start=4"))
+                return item
+
+            def validate(self, document, target):
+                return self._normalize(super().validate(document, target))
+
+            def read(self, item_id):
+                return self._normalize(super().read(item_id))
+
+        fake = AzureHtmlNormalizer.with_item(42, rev=3, item_type="Bug")
+        out = _run(update, fake, self._args(
+            apply=True,
+            state=None,
+            repro_steps_file=_file("3. Run:\n\n```sh\ngo test ./...\n```\n\n4. Observe"),
+        ))
+        self.assertEqual(out["mode"], "applied")
+        self.assertEqual(fake.applies, 1)
+
     def test_non_bug_rejects_bug_field_updates(self):
         with self.assertRaises(RuntimeError) as cm:
             _run(update, self._seeded(), self._args(

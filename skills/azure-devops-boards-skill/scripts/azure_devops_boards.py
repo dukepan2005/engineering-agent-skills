@@ -3,6 +3,7 @@
 
 import argparse
 import html
+from html.parser import HTMLParser
 import json
 import os
 import re
@@ -172,6 +173,36 @@ def _read_bug_html(value_file, field_name):
     if not markdown.strip():
         raise RuntimeError(f"{field_name} must not be empty.")
     return markdown_to_bug_html(markdown)
+
+
+class _HtmlTokenCollector(HTMLParser):
+    """Collect a structural HTML fragment representation for Azure normalization."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tokens = []
+
+    def handle_starttag(self, tag, attrs):
+        self.tokens.append(("start", tag.lower(), tuple(sorted((name.lower(), value or "") for name, value in attrs))))
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag):
+        self.tokens.append(("end", tag.lower()))
+
+    def handle_data(self, data):
+        self.tokens.append(("data", data))
+
+
+def _same_bug_html(expected, actual):
+    """Compare native Bug HTML while accepting Azure's attribute-quote normalization."""
+    if not isinstance(actual, str):
+        return False
+    expected_tokens, actual_tokens = _HtmlTokenCollector(), _HtmlTokenCollector()
+    expected_tokens.feed(expected); expected_tokens.close()
+    actual_tokens.feed(actual); actual_tokens.close()
+    return expected_tokens.tokens == actual_tokens.tokens
 
 
 def _comment_id(comment):
@@ -472,7 +503,10 @@ def _evaluate(item, expectation, phase, *, check_relation=True, check_descriptio
     fields = item.get("fields", {})
     for field, value in expectation.fields.items():
         actual = fields.get(field)
-        if actual != value:
+        matches = (_same_bug_html(value, actual)
+                   if field in ("Microsoft.VSTS.TCM.ReproSteps", "Microsoft.VSTS.TCM.SystemInfo")
+                   else actual == value)
+        if not matches:
             requested = json.dumps(value, ensure_ascii=False)
             returned = json.dumps(actual, ensure_ascii=False)
             raise RuntimeError(
