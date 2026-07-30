@@ -3,10 +3,8 @@
 
 import argparse
 import html
-from html.parser import HTMLParser
 import json
 import os
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 import subprocess
@@ -48,6 +46,7 @@ class Expectation:
     """Declarative post-condition the runner checks against the validated item
     (always) and the read-back item (when applying)."""
     fields: dict = field(default_factory=dict)
+    multiline_formats: dict = field(default_factory=dict)
     description: str = None
     relation: tuple = None
 
@@ -65,159 +64,11 @@ def op(cls, verb, path, value): return cls(op=verb, path=path, value=value)
 def emit(value): print(json.dumps(value, ensure_ascii=False, indent=2, default=str))
 
 
-def _inline_bug_markdown(value):
-    """Render the safe inline subset used by Bug evidence fields."""
-    def render_text(text):
-        text = html.escape(text, quote=False)
-        text = re.sub(r"\*\*([^*]+)\*\*|__([^_]+)__", lambda match: f"<strong>{match.group(1) or match.group(2)}</strong>", text)
-        return re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)|(?<!_)_([^_]+)_(?!_)", lambda match: f"<em>{match.group(1) or match.group(2)}</em>", text)
-
-    parts = re.split(r"(`[^`\n]*`|\[[^\]]+\]\(https://[^\s)]+\))", value)
-    rendered = []
-    for part in parts:
-        if part.startswith("`") and part.endswith("`"):
-            rendered.append(f"<code>{html.escape(part[1:-1], quote=False)}</code>")
-            continue
-        link = re.fullmatch(r"\[([^\]]+)\]\((https://[^\s)]+)\)", part)
-        if link:
-            rendered.append(f'<a href="{html.escape(link.group(2), quote=True)}">{render_text(link.group(1))}</a>')
-            continue
-        rendered.append(render_text(part))
-    return "".join(rendered)
-
-
-def markdown_to_bug_html(markdown):
-    """Render supported Markdown evidence as safe HTML for native Bug fields.
-
-    Headings, paragraphs, flat ordered/unordered lists, fenced code blocks,
-    block quotes, inline code, emphasis, strong text, and HTTPS links are
-    supported. Raw HTML is escaped; indented/nested lists fail explicitly.
-    """
-    lines = markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    rendered, paragraph, list_kind, list_start, list_items, code_lines = [], [], None, None, [], None
-
-    def flush_paragraph():
-        nonlocal paragraph
-        if paragraph:
-            rendered.append("<p>" + "<br />\n".join(_inline_bug_markdown(line) for line in paragraph) + "</p>")
-            paragraph = []
-
-    def flush_list():
-        nonlocal list_kind, list_start, list_items
-        if list_kind is not None:
-            start = f' start="{list_start}"' if list_kind == "ol" and list_start != 1 else ""
-            rendered.append(f"<{list_kind}{start}>\n" + "\n".join(f"<li>{item}</li>" for item in list_items) + f"\n</{list_kind}>")
-            list_kind, list_start, list_items = None, None, []
-
-    for line in lines:
-        if code_lines is not None:
-            language, indentation, code_body = code_lines
-            if re.fullmatch(rf" {{0,{indentation}}}```\s*", line):
-                language_class = f' class="language-{language}"' if language else ""
-                rendered.append(f"<pre><code{language_class}>" + html.escape("\n".join(code_body), quote=False) + "\n</code></pre>")
-                code_lines = None
-            else:
-                code_body.append(line[indentation:] if line.startswith(" " * indentation) else line)
-            continue
-        fence = re.fullmatch(r"( {0,3})```([A-Za-z0-9_-]*)\s*", line)
-        if fence:
-            flush_paragraph(); flush_list()
-            code_lines = (fence.group(2), len(fence.group(1)), [])
-            continue
-        if not line.strip():
-            flush_paragraph(); flush_list()
-            continue
-        non_code = re.sub(r"`[^`\n]*`", "", line)
-        if re.search(r"!\[[^\]]*\]\([^\n)]*\)", non_code):
-            raise RuntimeError("Images are not supported in Bug field Markdown.")
-        if "|" in line and re.fullmatch(r"\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*", line):
-            raise RuntimeError("Tables are not supported in Bug field Markdown.")
-        if re.match(r"^ {4,}\S", line):
-            raise RuntimeError("Indented code blocks are not supported in Bug field Markdown.")
-        if re.match(r"^\s+([-+*]|\d+[.)])\s+", line):
-            raise RuntimeError("Nested lists are not supported in Bug field Markdown.")
-        heading = re.fullmatch(r"(#{1,6})\s+(.+)", line)
-        if heading:
-            flush_paragraph(); flush_list()
-            level = len(heading.group(1))
-            rendered.append(f"<h{level}>{_inline_bug_markdown(heading.group(2))}</h{level}>")
-            continue
-        unordered = re.fullmatch(r"[-+*]\s+(.+)", line)
-        ordered = re.fullmatch(r"(\d+)[.)]\s+(.+)", line)
-        next_kind = "ul" if unordered else "ol" if ordered else None
-        if next_kind:
-            flush_paragraph()
-            if list_kind != next_kind:
-                flush_list()
-                list_kind = next_kind
-                list_start = int(ordered.group(1)) if ordered else None
-            list_items.append(_inline_bug_markdown(unordered.group(1) if unordered else ordered.group(2)))
-            continue
-        if line.startswith("> "):
-            flush_paragraph(); flush_list()
-            rendered.append(f"<blockquote><p>{_inline_bug_markdown(line[2:])}</p></blockquote>")
-            continue
-        if re.fullmatch(r"[-*_]{3,}\s*", line):
-            flush_paragraph(); flush_list(); rendered.append("<hr />")
-            continue
-        flush_list()
-        paragraph.append(line)
-    if code_lines is not None:
-        raise RuntimeError("Unclosed fenced code block in Bug field Markdown.")
-    flush_paragraph(); flush_list()
-    return "\n".join(rendered)
-
-
-def _read_bug_html(value_file, field_name):
+def _read_bug_markdown(value_file, field_name):
     markdown = value_file.read_text()
     if not markdown.strip():
         raise RuntimeError(f"{field_name} must not be empty.")
-    return markdown_to_bug_html(markdown)
-
-
-class _HtmlTokenCollector(HTMLParser):
-    """Collect a structural HTML fragment representation for Azure normalization."""
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.tokens = []
-        self._open_tags = []
-
-    def handle_starttag(self, tag, attrs):
-        name = tag.lower()
-        self.tokens.append(("start", name, tuple(sorted((attribute.lower(), value or "") for attribute, value in attrs))))
-        self._open_tags.append(name)
-
-    def handle_startendtag(self, tag, attrs):
-        name = tag.lower()
-        self.tokens.append(("start", name, tuple(sorted((attribute.lower(), value or "") for attribute, value in attrs))))
-
-    def handle_endtag(self, tag):
-        name = tag.lower()
-        self.tokens.append(("end", name))
-        if self._open_tags and self._open_tags[-1] == name:
-            self._open_tags.pop()
-
-    def handle_data(self, data):
-        if "pre" not in self._open_tags and "code" not in self._open_tags:
-            data = data.rstrip(" ")
-            if not data:
-                return
-        self.tokens.append(("data", data))
-
-
-def _same_bug_html(expected, actual):
-    """Compare native Bug HTML while accepting Azure's cosmetic normalization.
-
-    Azure removes attribute quotes and appends a space before ordinary closing
-    tags. Code/preformatted text stays byte-sensitive.
-    """
-    if not isinstance(actual, str):
-        return False
-    expected_tokens, actual_tokens = _HtmlTokenCollector(), _HtmlTokenCollector()
-    expected_tokens.feed(expected); expected_tokens.close()
-    actual_tokens.feed(actual); actual_tokens.close()
-    return expected_tokens.tokens == actual_tokens.tokens
+    return markdown
 
 
 def _comment_id(comment):
@@ -518,15 +369,19 @@ def _evaluate(item, expectation, phase, *, check_relation=True, check_descriptio
     fields = item.get("fields", {})
     for field, value in expectation.fields.items():
         actual = fields.get(field)
-        matches = (_same_bug_html(value, actual)
-                   if field in ("Microsoft.VSTS.TCM.ReproSteps", "Microsoft.VSTS.TCM.SystemInfo")
-                   else actual == value)
-        if not matches:
+        if actual != value:
             requested = json.dumps(value, ensure_ascii=False)
             returned = json.dumps(actual, ensure_ascii=False)
             raise RuntimeError(
                 f"{phase} failed for {field}: requested {requested}, "
                 f"but Azure returned {returned}."
+            )
+    formats = item.get("multilineFieldsFormat", {})
+    for field, value in expectation.multiline_formats.items():
+        if formats.get(field) != value:
+            raise RuntimeError(
+                f"{phase} failed for {field} format: requested {value!r}, "
+                f"but Azure returned {formats.get(field)!r}."
             )
     if check_relation and expectation.relation is not None:
         rel, url = expectation.relation
@@ -561,7 +416,7 @@ def relation(args, kind, target):
 def create(args):
     client, cls = connect(args); text = args.description_file.read_text(); iteration = args.iteration or sprint(args)
     document = [op(cls, "add", "/fields/System.Title", args.title), op(cls, "add", "/fields/System.Description", text), op(cls, "add", "/multilineFieldsFormat/System.Description", "markdown"), op(cls, "add", "/fields/System.IterationPath", iteration)]
-    expected_fields = {"System.IterationPath": iteration}
+    expected_fields = {"System.IterationPath": iteration}; expected_formats = {}
     repro_steps_file = getattr(args, "repro_steps_file", None)
     system_info_file = getattr(args, "system_info_file", None)
     comment_file = getattr(args, "comment_file", None)
@@ -576,18 +431,22 @@ def create(args):
     ):
         value_file = locals()[option]
         if value_file is not None:
-            value = _read_bug_html(value_file, field_name)
+            value = _read_bug_markdown(value_file, field_name)
             document.append(op(cls, "add", f"/fields/{field_name}", value))
+            document.append(op(cls, "add", f"/multilineFieldsFormat/{field_name}", "markdown"))
             expected_fields[field_name] = value
+            expected_formats[field_name] = "markdown"
     if args.type == "Bug" and initial_comment is not None and repro_steps_file is None:
-        repro_steps = markdown_to_bug_html(initial_comment)
+        repro_steps = initial_comment
         document.append(op(cls, "add", "/fields/Microsoft.VSTS.TCM.ReproSteps", repro_steps))
+        document.append(op(cls, "add", "/multilineFieldsFormat/Microsoft.VSTS.TCM.ReproSteps", "markdown"))
         expected_fields["Microsoft.VSTS.TCM.ReproSteps"] = repro_steps
+        expected_formats["Microsoft.VSTS.TCM.ReproSteps"] = "markdown"
         initial_comment = None
     if args.tags: document.append(op(cls, "add", "/fields/System.Tags", "; ".join(args.tags)))
     for kind in RELATIONS:
         for target in getattr(args, kind): document.append(op(cls, "add", "/relations/-", relation(args, kind, target)))
-    expectation = Expectation(fields=expected_fields, description=text)
+    expectation = Expectation(fields=expected_fields, multiline_formats=expected_formats, description=text)
     result = safe_mutate(client=client, target=NewItem(args.type), document=document, expectation=expectation, apply=args.apply)
     if result["mode"] == "validated":
         output = {"mode": "validated", "type": args.type, "title": args.title, "iteration": iteration}
@@ -603,7 +462,7 @@ def create(args):
 
 
 def update(args):
-    client, cls = connect(args); before = client.read(args.id); document = [op(cls, "test", "/rev", before["rev"])]; expected = {}; text = None
+    client, cls = connect(args); before = client.read(args.id); document = [op(cls, "test", "/rev", before["rev"])]; expected = {}; expected_formats = {}; text = None
     if args.description_file:
         text = args.description_file.read_text(); document += [op(cls, "add", "/fields/System.Description", text), op(cls, "add", "/multilineFieldsFormat/System.Description", "markdown")]
     for field, value in (("System.State", args.state), ("System.IterationPath", args.iteration)):
@@ -615,11 +474,13 @@ def update(args):
             raise RuntimeError("Bug-specific fields require a Bug work item.")
         for value_file, field_name in bug_files:
             if value_file is not None:
-                value = _read_bug_html(value_file, field_name)
+                value = _read_bug_markdown(value_file, field_name)
                 document.append(op(cls, "add", f"/fields/{field_name}", value))
+                document.append(op(cls, "add", f"/multilineFieldsFormat/{field_name}", "markdown"))
                 expected[field_name] = value
+                expected_formats[field_name] = "markdown"
     if len(document) == 1: raise RuntimeError("Specify a field to update.")
-    expectation = Expectation(fields=expected, description=text)
+    expectation = Expectation(fields=expected, multiline_formats=expected_formats, description=text)
     result = safe_mutate(client=client, target=ExistingItem(args.id), document=document, expectation=expectation, apply=args.apply)
     emit({**result, "id": args.id, "fields": expected})
 

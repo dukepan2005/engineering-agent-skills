@@ -122,12 +122,9 @@ For a high-risk change, or when a human should review before the write, omit
 `--apply` first to validate only, then repeat the identical command with
 `--apply`.
 
-Bug Repro Steps and System Info are Azure HTML fields. Their `--repro-steps-file`
-and `--system-info-file` inputs accept the helper's supported Markdown evidence
-subset (headings, paragraphs, flat lists, fenced code, block quotes, inline
-code, emphasis, strong text, and HTTPS links), render it as safe HTML, and are
-available on both `create` and `update`. Unsupported Markdown fails before a
-mutation rather than being silently degraded.
+Bug Repro Steps and System Info support Markdown. Their `--repro-steps-file`
+and `--system-info-file` inputs are stored verbatim with each field's
+`multilineFieldsFormat=markdown` metadata, on both `create` and `update`.
 
 For `predecessor`, the target work item blocks the current work item. For `parent`, the target is the current work item's parent. Re-adding an existing relation returns `unchanged`.
 
