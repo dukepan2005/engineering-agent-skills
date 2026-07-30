@@ -196,7 +196,7 @@ class UpdateCommandTests(unittest.TestCase):
         self.assertEqual(stored["Microsoft.VSTS.TCM.SystemInfo"],
                          "<ul>\n<li>macOS</li>\n</ul>")
 
-    def test_bug_fields_accept_azure_attribute_quote_normalization(self):
+    def test_bug_fields_accept_azure_html_normalization(self):
         class AzureHtmlNormalizer(FakeClient):
             @staticmethod
             def _normalize(item):
@@ -204,7 +204,9 @@ class UpdateCommandTests(unittest.TestCase):
                     value = item["fields"].get(field)
                     if isinstance(value, str):
                         item["fields"][field] = (value.replace('class="language-sh"', "class=language-sh")
-                                                          .replace('start="4"', "start=4"))
+                                                          .replace('start="4"', "start=4")
+                                                          .replace("</h2>", " </h2>")
+                                                          .replace("</li>", " </li>"))
                 return item
 
             def validate(self, document, target):

@@ -181,22 +181,37 @@ class _HtmlTokenCollector(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.tokens = []
+        self._open_tags = []
 
     def handle_starttag(self, tag, attrs):
-        self.tokens.append(("start", tag.lower(), tuple(sorted((name.lower(), value or "") for name, value in attrs))))
+        name = tag.lower()
+        self.tokens.append(("start", name, tuple(sorted((attribute.lower(), value or "") for attribute, value in attrs))))
+        self._open_tags.append(name)
 
     def handle_startendtag(self, tag, attrs):
-        self.handle_starttag(tag, attrs)
+        name = tag.lower()
+        self.tokens.append(("start", name, tuple(sorted((attribute.lower(), value or "") for attribute, value in attrs))))
 
     def handle_endtag(self, tag):
-        self.tokens.append(("end", tag.lower()))
+        name = tag.lower()
+        self.tokens.append(("end", name))
+        if self._open_tags and self._open_tags[-1] == name:
+            self._open_tags.pop()
 
     def handle_data(self, data):
+        if "pre" not in self._open_tags and "code" not in self._open_tags:
+            data = data.rstrip(" ")
+            if not data:
+                return
         self.tokens.append(("data", data))
 
 
 def _same_bug_html(expected, actual):
-    """Compare native Bug HTML while accepting Azure's attribute-quote normalization."""
+    """Compare native Bug HTML while accepting Azure's cosmetic normalization.
+
+    Azure removes attribute quotes and appends a space before ordinary closing
+    tags. Code/preformatted text stays byte-sensitive.
+    """
     if not isinstance(actual, str):
         return False
     expected_tokens, actual_tokens = _HtmlTokenCollector(), _HtmlTokenCollector()
