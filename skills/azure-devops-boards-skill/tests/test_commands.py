@@ -18,7 +18,10 @@ sys.path.insert(0, str(HERE))                     # tests/   → fakes
 sys.path.insert(0, str(HERE.parent / "scripts"))  # scripts/ → azure_devops_boards
 
 from fakes import FakeClient, PatchOp  # noqa: E402
-from azure_devops_boards import RELATIONS, add_comment, add_link, close_task, create, parser, preflight, show_item, update  # noqa: E402
+from azure_devops_boards import (  # noqa: E402
+    RELATIONS, add_comment, add_link, close_task, create, markdown_to_bug_html,
+    parser, preflight, show_item, update,
+)
 
 ORG, PROJECT = "https://dev.azure.com/o", "P"
 
@@ -43,6 +46,14 @@ class CreateCommandTests(unittest.TestCase):
                 "--type", item_type, "--title", "T", "--description-file", "/tmp/item.md",
             ])
             self.assertEqual(args.type, item_type)
+
+    def test_update_parser_accepts_bug_field_files(self):
+        args = parser().parse_args([
+            "update", "--organization", ORG, "--project", PROJECT, "--id", "42",
+            "--repro-steps-file", "/tmp/repro.md", "--system-info-file", "/tmp/system.md",
+        ])
+        self.assertEqual(str(args.repro_steps_file), "/tmp/repro.md")
+        self.assertEqual(str(args.system_info_file), "/tmp/system.md")
 
     def _args(self, apply, text="body", iteration="Sprint 1"):
         return SimpleNamespace(organization=ORG, project=PROJECT, apply=apply, type="Task",
@@ -70,8 +81,8 @@ class CreateCommandTests(unittest.TestCase):
         out = _run(create, fake, args)
         self.assertEqual(out["mode"], "applied")
         stored = fake.read(out["id"])["fields"]
-        self.assertEqual(stored["Microsoft.VSTS.TCM.ReproSteps"], "## Reproduction\n\n1. Open the screen\n2. Observe the `crash`")
-        self.assertEqual(stored["Microsoft.VSTS.TCM.SystemInfo"], "**iOS 18.5**\n\n- iPhone 15")
+        self.assertEqual(stored["Microsoft.VSTS.TCM.ReproSteps"], "<h2>Reproduction</h2>\n<ol>\n<li>Open the screen</li>\n<li>Observe the <code>crash</code></li>\n</ol>")
+        self.assertEqual(stored["Microsoft.VSTS.TCM.SystemInfo"], "<p><strong>iOS 18.5</strong></p>\n<ul>\n<li>iPhone 15</li>\n</ul>")
         self.assertNotIn("Microsoft.VSTS.TCM.ReproSteps", fake.read(out["id"])["multilineFieldsFormat"])
         self.assertNotIn("Microsoft.VSTS.TCM.SystemInfo", fake.read(out["id"])["multilineFieldsFormat"])
 
@@ -82,7 +93,7 @@ class CreateCommandTests(unittest.TestCase):
         args.comment_file = _file("## Reproduction\n\n1. Open the screen\n2. Observe the `crash`")
         out = _run(create, fake, args)
         stored = fake.read(out["id"])["fields"]
-        self.assertEqual(stored["Microsoft.VSTS.TCM.ReproSteps"], "## Reproduction\n\n1. Open the screen\n2. Observe the `crash`")
+        self.assertEqual(stored["Microsoft.VSTS.TCM.ReproSteps"], "<h2>Reproduction</h2>\n<ol>\n<li>Open the screen</li>\n<li>Observe the <code>crash</code></li>\n</ol>")
         self.assertEqual(fake.comments, {})
 
     def test_bug_creation_keeps_initial_comment_when_repro_steps_are_explicit(self):
@@ -93,14 +104,56 @@ class CreateCommandTests(unittest.TestCase):
         args.comment_file = _file("additional triage context")
         out = _run(create, fake, args)
         stored = fake.read(out["id"])["fields"]
-        self.assertEqual(stored["Microsoft.VSTS.TCM.ReproSteps"], "native repro steps")
+        self.assertEqual(stored["Microsoft.VSTS.TCM.ReproSteps"], "<p>native repro steps</p>")
         self.assertEqual(fake.comments[out["id"]][0]["text"], "additional triage context")
+
+    def test_bug_field_markdown_escapes_raw_html(self):
+        self.assertEqual(markdown_to_bug_html("<script>alert('x')</script>"),
+                         "<p>&lt;script&gt;alert('x')&lt;/script&gt;</p>")
+
+    def test_bug_field_markdown_rejects_nested_lists(self):
+        with self.assertRaises(RuntimeError) as cm:
+            markdown_to_bug_html("- outer\n  - nested")
+        self.assertEqual(str(cm.exception), "Nested lists are not supported in Bug field Markdown.")
+
+    def test_bug_creation_rejects_unsupported_images_before_apply(self):
+        fake = FakeClient()
+        args = self._args(apply=True)
+        args.type = "Bug"
+        args.repro_steps_file = _file("![diagram](https://example.com/a.png)")
+        with self.assertRaises(RuntimeError) as cm:
+            _run(create, fake, args)
+        self.assertEqual(str(cm.exception), "Images are not supported in Bug field Markdown.")
+        self.assertEqual(fake.applies, 0)
+
+    def test_bug_field_markdown_allows_image_syntax_inside_fenced_code(self):
+        self.assertEqual(markdown_to_bug_html("```sh\necho '![diagram](https://example.com/a.png)'\n```"),
+                         "<pre><code class=\"language-sh\">echo '![diagram](https://example.com/a.png)'\n</code></pre>")
+
+    def test_bug_field_markdown_rejects_single_column_tables(self):
+        with self.assertRaises(RuntimeError) as cm:
+            markdown_to_bug_html("|col|\n|---|\n|value|")
+        self.assertEqual(str(cm.exception), "Tables are not supported in Bug field Markdown.")
+
+    def test_bug_field_markdown_renders_fenced_code(self):
+        self.assertEqual(markdown_to_bug_html("## Run\n\n```sh\ngo test ./...\n```"),
+                         "<h2>Run</h2>\n<pre><code class=\"language-sh\">go test ./...\n</code></pre>")
+
+    def test_bug_field_markdown_renders_three_space_indented_fenced_code(self):
+        self.assertEqual(markdown_to_bug_html("3. Run:\n\n   ```sh\n   go test -race ./...\n   ```"),
+                         "<ol start=\"3\">\n<li>Run:</li>\n</ol>\n<pre><code class=\"language-sh\">go test -race ./...\n</code></pre>")
+
+    def test_bug_field_markdown_preserves_https_link_urls(self):
+        self.assertEqual(markdown_to_bug_html("[release](https://example.com/a_b?x=1&y=2)"),
+                         "<p><a href=\"https://example.com/a_b?x=1&amp;y=2\">release</a></p>")
 
 
 class UpdateCommandTests(unittest.TestCase):
-    def _args(self, apply, state="Active", iteration=None, description_file=None):
+    def _args(self, apply, state="Active", iteration=None, description_file=None,
+              repro_steps_file=None, system_info_file=None):
         return SimpleNamespace(organization=ORG, project=PROJECT, apply=apply, id=42,
-                               state=state, iteration=iteration, description_file=description_file)
+                               state=state, iteration=iteration, description_file=description_file,
+                               repro_steps_file=repro_steps_file, system_info_file=system_info_file)
 
     def _seeded(self):
         return FakeClient.with_item(42, rev=3)
@@ -127,6 +180,28 @@ class UpdateCommandTests(unittest.TestCase):
         out = _run(update, fake, self._args(apply=True, state=None, description_file=_file("a && b")))
         self.assertEqual(out["mode"], "applied")
         self.assertEqual(fake.applies, 1)
+
+    def test_bug_fields_update_as_html(self):
+        fake = FakeClient.with_item(42, rev=3, item_type="Bug")
+        out = _run(update, fake, self._args(
+            apply=True,
+            state=None,
+            repro_steps_file=_file("## Reproduction\n\n1. Retry"),
+            system_info_file=_file("- macOS"),
+        ))
+        self.assertEqual(out["mode"], "applied")
+        stored = fake.read(42)["fields"]
+        self.assertEqual(stored["Microsoft.VSTS.TCM.ReproSteps"],
+                         "<h2>Reproduction</h2>\n<ol>\n<li>Retry</li>\n</ol>")
+        self.assertEqual(stored["Microsoft.VSTS.TCM.SystemInfo"],
+                         "<ul>\n<li>macOS</li>\n</ul>")
+
+    def test_non_bug_rejects_bug_field_updates(self):
+        with self.assertRaises(RuntimeError) as cm:
+            _run(update, self._seeded(), self._args(
+                apply=True, state=None, repro_steps_file=_file("1. Retry"),
+            ))
+        self.assertEqual(str(cm.exception), "Bug-specific fields require a Bug work item.")
 
 
 class AddLinkCommandTests(unittest.TestCase):

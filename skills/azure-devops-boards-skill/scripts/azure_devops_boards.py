@@ -5,6 +5,7 @@ import argparse
 import html
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 import subprocess
@@ -61,6 +62,116 @@ def sdk():
 
 def op(cls, verb, path, value): return cls(op=verb, path=path, value=value)
 def emit(value): print(json.dumps(value, ensure_ascii=False, indent=2, default=str))
+
+
+def _inline_bug_markdown(value):
+    """Render the safe inline subset used by Bug evidence fields."""
+    def render_text(text):
+        text = html.escape(text, quote=False)
+        text = re.sub(r"\*\*([^*]+)\*\*|__([^_]+)__", lambda match: f"<strong>{match.group(1) or match.group(2)}</strong>", text)
+        return re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)|(?<!_)_([^_]+)_(?!_)", lambda match: f"<em>{match.group(1) or match.group(2)}</em>", text)
+
+    parts = re.split(r"(`[^`\n]*`|\[[^\]]+\]\(https://[^\s)]+\))", value)
+    rendered = []
+    for part in parts:
+        if part.startswith("`") and part.endswith("`"):
+            rendered.append(f"<code>{html.escape(part[1:-1], quote=False)}</code>")
+            continue
+        link = re.fullmatch(r"\[([^\]]+)\]\((https://[^\s)]+)\)", part)
+        if link:
+            rendered.append(f'<a href="{html.escape(link.group(2), quote=True)}">{render_text(link.group(1))}</a>')
+            continue
+        rendered.append(render_text(part))
+    return "".join(rendered)
+
+
+def markdown_to_bug_html(markdown):
+    """Render supported Markdown evidence as safe HTML for native Bug fields.
+
+    Headings, paragraphs, flat ordered/unordered lists, fenced code blocks,
+    block quotes, inline code, emphasis, strong text, and HTTPS links are
+    supported. Raw HTML is escaped; indented/nested lists fail explicitly.
+    """
+    lines = markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    rendered, paragraph, list_kind, list_start, list_items, code_lines = [], [], None, None, [], None
+
+    def flush_paragraph():
+        nonlocal paragraph
+        if paragraph:
+            rendered.append("<p>" + "<br />\n".join(_inline_bug_markdown(line) for line in paragraph) + "</p>")
+            paragraph = []
+
+    def flush_list():
+        nonlocal list_kind, list_start, list_items
+        if list_kind is not None:
+            start = f' start="{list_start}"' if list_kind == "ol" and list_start != 1 else ""
+            rendered.append(f"<{list_kind}{start}>\n" + "\n".join(f"<li>{item}</li>" for item in list_items) + f"\n</{list_kind}>")
+            list_kind, list_start, list_items = None, None, []
+
+    for line in lines:
+        if code_lines is not None:
+            language, indentation, code_body = code_lines
+            if re.fullmatch(rf" {{0,{indentation}}}```\s*", line):
+                language_class = f' class="language-{language}"' if language else ""
+                rendered.append(f"<pre><code{language_class}>" + html.escape("\n".join(code_body), quote=False) + "\n</code></pre>")
+                code_lines = None
+            else:
+                code_body.append(line[indentation:] if line.startswith(" " * indentation) else line)
+            continue
+        fence = re.fullmatch(r"( {0,3})```([A-Za-z0-9_-]*)\s*", line)
+        if fence:
+            flush_paragraph(); flush_list()
+            code_lines = (fence.group(2), len(fence.group(1)), [])
+            continue
+        if not line.strip():
+            flush_paragraph(); flush_list()
+            continue
+        non_code = re.sub(r"`[^`\n]*`", "", line)
+        if re.search(r"!\[[^\]]*\]\([^\n)]*\)", non_code):
+            raise RuntimeError("Images are not supported in Bug field Markdown.")
+        if "|" in line and re.fullmatch(r"\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*", line):
+            raise RuntimeError("Tables are not supported in Bug field Markdown.")
+        if re.match(r"^ {4,}\S", line):
+            raise RuntimeError("Indented code blocks are not supported in Bug field Markdown.")
+        if re.match(r"^\s+([-+*]|\d+[.)])\s+", line):
+            raise RuntimeError("Nested lists are not supported in Bug field Markdown.")
+        heading = re.fullmatch(r"(#{1,6})\s+(.+)", line)
+        if heading:
+            flush_paragraph(); flush_list()
+            level = len(heading.group(1))
+            rendered.append(f"<h{level}>{_inline_bug_markdown(heading.group(2))}</h{level}>")
+            continue
+        unordered = re.fullmatch(r"[-+*]\s+(.+)", line)
+        ordered = re.fullmatch(r"(\d+)[.)]\s+(.+)", line)
+        next_kind = "ul" if unordered else "ol" if ordered else None
+        if next_kind:
+            flush_paragraph()
+            if list_kind != next_kind:
+                flush_list()
+                list_kind = next_kind
+                list_start = int(ordered.group(1)) if ordered else None
+            list_items.append(_inline_bug_markdown(unordered.group(1) if unordered else ordered.group(2)))
+            continue
+        if line.startswith("> "):
+            flush_paragraph(); flush_list()
+            rendered.append(f"<blockquote><p>{_inline_bug_markdown(line[2:])}</p></blockquote>")
+            continue
+        if re.fullmatch(r"[-*_]{3,}\s*", line):
+            flush_paragraph(); flush_list(); rendered.append("<hr />")
+            continue
+        flush_list()
+        paragraph.append(line)
+    if code_lines is not None:
+        raise RuntimeError("Unclosed fenced code block in Bug field Markdown.")
+    flush_paragraph(); flush_list()
+    return "\n".join(rendered)
+
+
+def _read_bug_html(value_file, field_name):
+    markdown = value_file.read_text()
+    if not markdown.strip():
+        raise RuntimeError(f"{field_name} must not be empty.")
+    return markdown_to_bug_html(markdown)
 
 
 def _comment_id(comment):
@@ -416,14 +527,13 @@ def create(args):
     ):
         value_file = locals()[option]
         if value_file is not None:
-            value = value_file.read_text()
-            if not value.strip():
-                raise RuntimeError(f"{field_name} must not be empty.")
+            value = _read_bug_html(value_file, field_name)
             document.append(op(cls, "add", f"/fields/{field_name}", value))
             expected_fields[field_name] = value
     if args.type == "Bug" and initial_comment is not None and repro_steps_file is None:
-        document.append(op(cls, "add", "/fields/Microsoft.VSTS.TCM.ReproSteps", initial_comment))
-        expected_fields["Microsoft.VSTS.TCM.ReproSteps"] = initial_comment
+        repro_steps = markdown_to_bug_html(initial_comment)
+        document.append(op(cls, "add", "/fields/Microsoft.VSTS.TCM.ReproSteps", repro_steps))
+        expected_fields["Microsoft.VSTS.TCM.ReproSteps"] = repro_steps
         initial_comment = None
     if args.tags: document.append(op(cls, "add", "/fields/System.Tags", "; ".join(args.tags)))
     for kind in RELATIONS:
@@ -449,6 +559,16 @@ def update(args):
         text = args.description_file.read_text(); document += [op(cls, "add", "/fields/System.Description", text), op(cls, "add", "/multilineFieldsFormat/System.Description", "markdown")]
     for field, value in (("System.State", args.state), ("System.IterationPath", args.iteration)):
         if value is not None: document.append(op(cls, "add", f"/fields/{field}", value)); expected[field] = value
+    bug_files = ((getattr(args, "repro_steps_file", None), "Microsoft.VSTS.TCM.ReproSteps"),
+                 (getattr(args, "system_info_file", None), "Microsoft.VSTS.TCM.SystemInfo"))
+    if any(value_file is not None for value_file, _ in bug_files):
+        if before.get("fields", {}).get("System.WorkItemType") != "Bug":
+            raise RuntimeError("Bug-specific fields require a Bug work item.")
+        for value_file, field_name in bug_files:
+            if value_file is not None:
+                value = _read_bug_html(value_file, field_name)
+                document.append(op(cls, "add", f"/fields/{field_name}", value))
+                expected[field_name] = value
     if len(document) == 1: raise RuntimeError("Specify a field to update.")
     expectation = Expectation(fields=expected, description=text)
     result = safe_mutate(client=client, target=ExistingItem(args.id), document=document, expectation=expectation, apply=args.apply)
@@ -565,10 +685,10 @@ def parser():
     show = commands.add_parser("show"); connection(show); show.add_argument("--id", type=int, required=True); show.add_argument("--full", action="store_true", help="emit the full Azure JSON"); show.set_defaults(run=show_item)
     snapshot = commands.add_parser("planning-snapshot"); connection(snapshot); snapshot_ids = snapshot.add_mutually_exclusive_group(required=True); snapshot_ids.add_argument("--story", type=int); snapshot_ids.add_argument("--id", dest="item_ids", action="append", type=int, metavar="ID"); snapshot.set_defaults(run=planning_snapshot)
     preflight_p = commands.add_parser("implement-preflight"); connection(preflight_p); preflight_p.add_argument("--id", type=int, required=True); preflight_p.set_defaults(run=preflight)
-    create_p = commands.add_parser("create"); connection(create_p, True); create_p.add_argument("--apply", action="store_true"); create_p.add_argument("--type", choices=("Epic", "Feature", "User Story", "Task", "Bug"), required=True); create_p.add_argument("--title", required=True); create_p.add_argument("--description-file", type=Path, required=True); create_p.add_argument("--repro-steps-file", type=Path, help="Bug-only Markdown content for Microsoft.VSTS.TCM.ReproSteps"); create_p.add_argument("--system-info-file", type=Path, help="Bug-only Markdown content for Microsoft.VSTS.TCM.SystemInfo"); create_p.add_argument("--comment-file", type=Path, help="Optional initial Markdown comment; for a Bug without --repro-steps-file it becomes Markdown Repro Steps"); create_p.add_argument("--iteration"); create_p.add_argument("--tags", action="append", default=[])
+    create_p = commands.add_parser("create"); connection(create_p, True); create_p.add_argument("--apply", action="store_true"); create_p.add_argument("--type", choices=("Epic", "Feature", "User Story", "Task", "Bug"), required=True); create_p.add_argument("--title", required=True); create_p.add_argument("--description-file", type=Path, required=True); create_p.add_argument("--repro-steps-file", type=Path, help="Bug-only Markdown rendered as HTML for Microsoft.VSTS.TCM.ReproSteps"); create_p.add_argument("--system-info-file", type=Path, help="Bug-only Markdown rendered as HTML for Microsoft.VSTS.TCM.SystemInfo"); create_p.add_argument("--comment-file", type=Path, help="Optional initial Markdown comment; for a Bug without --repro-steps-file it becomes HTML Repro Steps"); create_p.add_argument("--iteration"); create_p.add_argument("--tags", action="append", default=[])
     for kind in RELATIONS: create_p.add_argument(f"--{kind}", action="append", type=int, default=[])
     create_p.set_defaults(run=create)
-    update_p = commands.add_parser("update"); connection(update_p); update_p.add_argument("--apply", action="store_true"); update_p.add_argument("--id", type=int, required=True); update_p.add_argument("--description-file", type=Path); update_p.add_argument("--state"); update_p.add_argument("--iteration"); update_p.set_defaults(run=update)
+    update_p = commands.add_parser("update"); connection(update_p); update_p.add_argument("--apply", action="store_true"); update_p.add_argument("--id", type=int, required=True); update_p.add_argument("--description-file", type=Path); update_p.add_argument("--repro-steps-file", type=Path, help="Bug-only Markdown rendered as HTML Repro Steps"); update_p.add_argument("--system-info-file", type=Path, help="Bug-only Markdown rendered as HTML System Info"); update_p.add_argument("--state"); update_p.add_argument("--iteration"); update_p.set_defaults(run=update)
     comment = commands.add_parser("add-comment"); connection(comment); comment.add_argument("--apply", action="store_true"); comment.add_argument("--id", type=int, required=True); comment.add_argument("--comment-file", type=Path, required=True); comment.set_defaults(run=add_comment)
     close = commands.add_parser("close-task"); connection(close); close.add_argument("--apply", action="store_true"); close.add_argument("--id", type=int, required=True); close.add_argument("--expected-rev", type=int); close.add_argument("--state"); close.add_argument("--comment-file", type=Path, required=True); close_body = close.add_mutually_exclusive_group(); close_body.add_argument("--description-file", type=Path); close_body.add_argument("--check-ac", metavar="all|FRAGMENT"); close.set_defaults(run=close_task)
     link = commands.add_parser("add-link"); connection(link); link.add_argument("--apply", action="store_true"); link.add_argument("--id", type=int, required=True); link.add_argument("--kind", choices=tuple(RELATIONS), required=True); link.add_argument("--target-id", type=int, required=True); link.set_defaults(run=add_link)

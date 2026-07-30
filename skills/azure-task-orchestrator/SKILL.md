@@ -79,7 +79,8 @@ their comments when those fields are empty: many ticket-creation flows put
 reproduction evidence in Discussion instead. `discussion.comments` comes from
 the paginated Comments API and is not a synonym for full revision history. Do
 not spawn another child or perform non-Boards work. Bug Repro Steps and System
-Info remain Markdown and must be returned without HTML conversion.
+Info are Azure HTML fields; preserve their raw stored HTML in the snapshot and
+do not convert it to Markdown.
 ```
 
 One Boards child may make the helper calls needed to build this single snapshot;

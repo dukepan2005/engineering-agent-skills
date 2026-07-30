@@ -58,9 +58,10 @@ provides one creation-time `--comment-file` and no Repro Steps file, treat that
 payload as the Bug's Repro Steps. This fallback applies only inside creation;
 later `add-comment` calls are real Discussion comments. A Discussion comment
 is otherwise supplemental context, not a substitute when those values are
-known. Bug field files are Markdown: pass their contents through verbatim, do
-not convert them to HTML, and do not attach Description's Markdown metadata to
-the Bug fields.
+known. Bug field files use a supported Markdown evidence subset and are rendered
+as safe HTML before storage because the native fields are Azure HTML controls;
+do not attach Description's Markdown metadata to the Bug fields. Unsupported
+Markdown must fail rather than be silently rendered incorrectly.
 
 Before resolving, inspecting, selecting, or testing anything, read that command
 reference. There is no separate capability-discovery step.

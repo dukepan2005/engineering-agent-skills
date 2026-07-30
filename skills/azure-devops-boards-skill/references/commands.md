@@ -87,9 +87,11 @@ for a Bug and no `--repro-steps-file` is supplied, the helper treats that one
 creation-time payload as `Microsoft.VSTS.TCM.ReproSteps`. If Repro Steps are
 explicit, or if `add-comment` is used after creation, the payload remains a
 real Discussion comment. The Bug-specific flags are rejected for non-Bug work
-items. Use comments for supplemental context. Repro Steps and System Info files
-remain Markdown and are sent verbatim; the helper does not convert them to HTML
-or add Description's Markdown metadata to those fields.
+items. Use comments for supplemental context. Repro Steps and System Info inputs
+use the helper's supported Markdown evidence subset and are rendered as safe HTML
+for Azure's native HTML fields; they do not use Description's Markdown metadata.
+The same two flags are accepted by `update` for an existing Bug. Unsupported
+Markdown fails before mutation.
 
 ## Keep implementation synchronization compact
 
