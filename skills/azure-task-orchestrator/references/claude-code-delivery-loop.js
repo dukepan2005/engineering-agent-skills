@@ -27,6 +27,11 @@
 //     "AB#123": { preflight JSON from step 1 },
 //     ...
 //   },
+//   "trackerConnection": {
+//     "organization": "https://dev.azure.com/example",
+//     "project": "ExampleProject",
+//     "team": "Example Team"
+//   },
 //   "plannerReport": { full planner report object }
 // }
 
@@ -63,6 +68,17 @@ function resolveProfile(profileId) {
 const results = []
 const plan = args.validatedPlan || []
 const preflightResults = args.preflightResults || {}
+const trackerConnection = args.trackerConnection
+
+if (!trackerConnection?.organization || !trackerConnection?.project) {
+  throw new Error('trackerConnection.organization and trackerConnection.project are required')
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`
+}
+
+const boardsConnectionArgs = `--organization ${shellQuote(trackerConnection.organization)} --project ${shellQuote(trackerConnection.project)}`
 
 for (let i = 0; i < plan.length; i++) {
   const item = plan[i]
@@ -77,7 +93,7 @@ for (let i = 0; i < plan.length; i++) {
   phase('Preflight')
 
   const preflightResult = await agent(
-    `Use \`$azure-devops-boards-skill\` in its semantic \`task-boards-ops\` role. Run \`implement-preflight --id ${itemId}\` and return the JSON output unchanged. Do not perform any non-Boards work.`,
+    `Use \`$azure-devops-boards-skill\` in its semantic \`task-boards-ops\` role. Run \`implement-preflight ${boardsConnectionArgs} --id ${itemId}\` and return the JSON output unchanged. Do not perform any non-Boards work.`,
     {
       model: 'haiku',
       effort: 'low',
@@ -151,7 +167,7 @@ ${JSON.stringify(preflightData, null, 2)}
   // Extract revision from preflight data (needed for stale-revision check)
   const preflightRev = preflightData.rev || preflightData.revision || 'unknown'
 
-  const closeoutPrompt = `Use \`$azure-devops-boards-skill\` in its semantic \`task-boards-ops\` role. Read the current full Description with \`show --full --id ${itemId}\`. Apply only the evidence-backed Markdown checklist changes specified by the implementation summary, preserving all other Description content. Write the rewritten Description to \`/tmp/description_${itemId}.md\` and a Markdown completion comment to \`/tmp/comment_${itemId}.md\`. Then run \`close-task --apply --id ${itemId} --expected-rev ${preflightRev} --state Closed --description-file /tmp/description_${itemId}.md --comment-file /tmp/comment_${itemId}.md\`.
+  const closeoutPrompt = `Use \`$azure-devops-boards-skill\` in its semantic \`task-boards-ops\` role. Read the current full Description with \`show ${boardsConnectionArgs} --full --id ${itemId}\`. Apply only the evidence-backed Markdown checklist changes specified by the implementation summary, preserving all other Description content. Write the rewritten Description to \`/tmp/description_${itemId}.md\` and a Markdown completion comment to \`/tmp/comment_${itemId}.md\`. Then run \`close-task --apply ${boardsConnectionArgs} --id ${itemId} --expected-rev ${preflightRev} --state Closed --description-file /tmp/description_${itemId}.md --comment-file /tmp/comment_${itemId}.md\`.
 Return the JSON output unchanged. Do not use \`--check-ac\`, and do not perform any non-Boards work.
 
 Implementation delivery summary:

@@ -42,6 +42,27 @@ child. Stop without reading or changing code, Git state, or Azure Boards if no
 usable spawn primitive is available. Do not silently run the work item in the
 parent agent or fall back to the parent's profile.
 
+## Freeze Tracker Connection Before Spawning Boards Children
+
+Before the planning snapshot, resolve the current workspace's documented
+tracker connection into one explicit `trackerConnection` object:
+
+```text
+{ organization: <organization>, project: <project>, team: <team> }
+```
+
+Read the repository tracker guidance once in the parent, or accept this object
+from the caller. Require non-empty `organization` and `project`; require `team`
+only when resolving a current Sprint. If the documented configuration cannot be
+resolved unambiguously, return `Input not ready` before spawning a Boards child.
+Do not make children search repository documentation or rely on
+`AZURE_DEVOPS_*` environment variables.
+
+Pass `--organization <organization> --project <project>` explicitly on every
+Boards command. Pass `--team <team>` only to `current-sprint` or a create flow
+that resolves the current Sprint. The values are project input, never literals
+embedded in this reusable skill.
+
 ## Planning Snapshot — spawn task-boards-ops
 
 Before invoking `$task-model-planner`, the parent orchestrator must obtain one
@@ -61,12 +82,14 @@ work-item set and this self-contained instruction:
 
 ```text
 Use `$azure-devops-boards-skill` in its semantic `task-boards-ops` role. For a
-Story, run `planning-snapshot --story <story-id>` once. The Story's state does
+Story, run `planning-snapshot --organization <organization> --project <project>
+--story <story-id>` once. The Story's state does
 not gate this read-only snapshot; the server-side query must select only its direct New Task and Bug children,
 then return
 one JSON snapshot containing the Story and every selected target. Do not read a
 non-New child. For an explicit set, run
-`planning-snapshot --id <id> --id <id>` once for the requested Task/Bug set;
+`planning-snapshot --organization <organization> --project <project> --id <id>
+--id <id>` once for the requested Task/Bug set;
 preserve the supplied order and do not invent a parent. For every included item
 retain all fields, multiline formats, raw and
 normalized relations, attachments, linked references, full comments/discussion,
@@ -170,8 +193,8 @@ work-item ID and this self-contained instruction:
 
 ```text
 Use `$azure-devops-boards-skill` in its semantic `task-boards-ops` role. Run
-`implement-preflight --id <id>` and return the JSON output unchanged. Do not
-perform any non-Boards work.
+`implement-preflight --organization <organization> --project <project> --id
+<id>` and return the JSON output unchanged. Do not perform any non-Boards work.
 ```
 
 The preflight JSON must retain all fields, multiline formats, attachments, and
@@ -267,12 +290,14 @@ implementation delivery summary, and this self-contained instruction:
 
 ```text
 Use `$azure-devops-boards-skill` in its semantic `task-boards-ops` role. Read
-the current full Description with `show --full --id <id>`. Apply only the
-evidence-backed Markdown checklist changes specified by the implementation
-summary, preserving all other Description content. Write the rewritten
-Description to `<tmpdescription>` and a Markdown completion comment to
-`<tmpcomment>`. Then run `close-task --apply --id <id> --expected-rev <rev>
---state Closed --description-file <tmpdescription> --comment-file <tmpcomment>`.
+the current full Description with `show --organization <organization> --project
+<project> --full --id <id>`. Apply only the evidence-backed Markdown checklist
+changes specified by the implementation summary, preserving all other
+Description content. Write the rewritten Description to `<tmpdescription>` and
+a Markdown completion comment to `<tmpcomment>`. Then run `close-task --apply
+--organization <organization> --project <project> --id <id> --expected-rev
+<rev> --state Closed --description-file <tmpdescription> --comment-file
+<tmpcomment>`.
 Return the JSON output unchanged. Do not use `--check-ac`, and do not perform
 any non-Boards work.
 ```

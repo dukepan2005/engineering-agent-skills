@@ -50,8 +50,8 @@ class SkillDependencyContractTests(unittest.TestCase):
         text = self.read_skill("azure-task-orchestrator")
 
         self.assertIn("Planning Snapshot — spawn task-boards-ops", text)
-        self.assertIn("planning-snapshot --story <story-id>", text)
-        self.assertIn("planning-snapshot --id <id> --id <id>", text)
+        self.assertIn("planning-snapshot --organization <organization> --project <project>\n--story <story-id>", text)
+        self.assertIn("planning-snapshot --organization <organization> --project <project> --id <id>\n--id <id>", text)
         self.assertIn("direct New Task and Bug children", text)
         self.assertRegex(text, re.compile(r"Do not read a\s+non-New child"))
         self.assertRegex(text, re.compile(r"Then\s+pass that composite snapshot to\s+`\$task-model-planner`"))
@@ -91,7 +91,7 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("Read the current full Description", text)
         self.assertIn("explicit implementation evidence", text)
         self.assertIn("--description-file <tmpdescription>", text)
-        self.assertIn("--comment-file <tmpcomment>", text)
+        self.assertRegex(text, r"--comment-file\s+<tmpcomment>")
         self.assertNotIn("never pass `--check-ac` or `--description-file`", text)
 
     def test_boards_role_is_semantic_across_hosts(self) -> None:
@@ -209,6 +209,28 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("return report", script_text)
         self.assertIn("totalItems", script_text)
         self.assertIn("completedItems", script_text)
+
+    def test_orchestrator_requires_and_propagates_explicit_tracker_connection(self) -> None:
+        skill = self.read_skill("azure-task-orchestrator")
+        script = (
+            REPO_ROOT
+            / "skills"
+            / "azure-task-orchestrator"
+            / "references"
+            / "claude-code-delivery-loop.js"
+        ).read_text()
+
+        self.assertIn("trackerConnection", skill)
+        self.assertIn("--organization <organization>", skill)
+        self.assertIn("--project <project>", skill)
+        self.assertNotIn("implement-preflight --id <id>", skill)
+        self.assertNotIn("show --full --id <id>", skill)
+
+        self.assertIn("args.trackerConnection", script)
+        self.assertIn("--organization ${shellQuote(trackerConnection.organization)}", script)
+        self.assertIn("--project ${shellQuote(trackerConnection.project)}", script)
+        self.assertNotIn("implement-preflight --id ${itemId}", script)
+        self.assertNotIn("show --full --id ${itemId}", script)
 
 
 if __name__ == "__main__":
