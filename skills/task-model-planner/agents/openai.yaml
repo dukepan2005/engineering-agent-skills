@@ -2,5 +2,3 @@ interface:
   display_name: "Task Model Planner"
   short_description: "Choose profiles from a work-item snapshot"
   default_prompt: "Use $task-model-planner to recommend execution profiles from the provided authoritative work-item snapshot."
-policy:
-  allow_implicit_invocation: false
