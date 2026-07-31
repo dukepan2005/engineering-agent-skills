@@ -275,7 +275,7 @@ scope, the unresolved findings, and the current workspace. It must repair the
 existing task delta, rerun verification, use `$code-review`, and return the same
 structured outcome. Record planned, initial effective, and recovery profiles.
 On Codex, `sol-max` resolves to `gpt-5.6-sol` / `max`; on Claude Code, it
-resolves to Fable / `max`. A host that cannot resolve it must report
+resolves to `claude-opus-5` / `max`. A host that cannot resolve it must report
 `review_escalation_unavailable`; it must not substitute `sol-xhigh` or another
 profile. Do not auto-select an `xhigh` profile, retry a second recovery worker,
 close the item, or dispatch later work while recovery is unresolved. If no mapped

@@ -52,7 +52,7 @@ const PROFILES = {
   'terra-xhigh': { model: 'sonnet', effort: 'xhigh' },
   'sol-medium': { model: 'opus', effort: 'medium' },
   'sol-high': { model: 'claude-opus-5', effort: 'high' },
-  'sol-max': { model: 'fable', effort: 'max' },
+  'sol-max': { model: 'claude-opus-5', effort: 'max' },
   'sol-xhigh': { model: 'claude-opus-5', effort: 'xhigh' },
 }
 

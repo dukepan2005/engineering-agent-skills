@@ -43,14 +43,14 @@ orchestrator stops the run instead of retrying with a substitute profile.
 | `terra-xhigh` | `sonnet` | `xhigh` |
 | `sol-medium` | `opus` | `medium` |
 | `sol-high` | `claude-opus-5` | `high` |
-| `sol-max` | `fable` | `max` |
+| `sol-max` | `claude-opus-5` | `max` |
 | `sol-xhigh` | `claude-opus-5` | `xhigh` |
 
 Claude Code's `terra` family uses `sonnet` (cost-optimized reasoning),
-`sol-medium` uses `opus`, `sol-high` uses `claude-opus-5` (stronger judgment),
-and `sol-max` uses Fable at `max` effort. `sol-xhigh` also uses `claude-opus-5`
-at `xhigh` effort because this profile is reserved for cases where deep
-reasoning, high-consequence judgment, and weaker verification converge.
+`sol-medium` uses `opus`; `sol-high`, `sol-max`, and `sol-xhigh` use
+`claude-opus-5` at their respective efforts. The exceptional higher-reasoning
+profiles are reserved for cases where deep reasoning, high-consequence judgment,
+and weaker verification converge.
 
 `model` and `effort` here are exactly the `opts.model` and `opts.effort`
 fields of a `Workflow` script's `agent()` call. The bare `Agent` tool cannot
@@ -93,8 +93,8 @@ separate mapping:
 `terra-medium`, `terra-high`, and `sol-medium` → `sol-high`; `sol-high` →
 `sol-max`.
 
-`sol-max` resolves to `gpt-5.6-sol` with `max` reasoning on Codex and Fable
-with `max` effort on Claude Code. Cursor must report this recovery as
-unavailable when requested; it must not substitute `sol-xhigh` or another
-profile. This is not a capacity fallback, never jumps to `xhigh`, and stops
-rather than escalating again if the recovery review remains blocking.
+`sol-max` resolves to `gpt-5.6-sol` with `max` reasoning on Codex and
+`claude-opus-5` with `max` effort on Claude Code. Cursor must report this
+recovery as unavailable when requested; it must not substitute `sol-xhigh` or
+another profile. This is not a capacity fallback, never jumps to `xhigh`, and
+stops rather than escalating again if the recovery review remains blocking.
