@@ -274,13 +274,14 @@ Spawn exactly one recovery worker at that higher profile with the same work-item
 scope, the unresolved findings, and the current workspace. It must repair the
 existing task delta, rerun verification, use `$code-review`, and return the same
 structured outcome. Record planned, initial effective, and recovery profiles.
-`sol-max` is currently a Codex-only `gpt-5.6-sol` / `max` profile. A host that
-cannot resolve it must report `review_escalation_unavailable`; it must not
-substitute `sol-xhigh` or another profile. Do not auto-select an `xhigh` profile,
-retry a second recovery worker, close the item, or dispatch later work while
-recovery is unresolved. If no mapped recovery profile is available, the recovery
-worker fails, or its post-fix review still returns `review_escalation_required`,
-stop and report the blocker for human replanning.
+On Codex, `sol-max` resolves to `gpt-5.6-sol` / `max`; on Claude Code, it
+resolves to Fable / `max`. A host that cannot resolve it must report
+`review_escalation_unavailable`; it must not substitute `sol-xhigh` or another
+profile. Do not auto-select an `xhigh` profile, retry a second recovery worker,
+close the item, or dispatch later work while recovery is unresolved. If no mapped
+recovery profile is available, the recovery worker fails, or its post-fix review
+still returns `review_escalation_required`, stop and report the blocker for human
+replanning.
 
 ### 3. Closeout — spawn cheap agent
 

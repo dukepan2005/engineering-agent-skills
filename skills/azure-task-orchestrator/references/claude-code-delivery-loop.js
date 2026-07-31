@@ -52,6 +52,7 @@ const PROFILES = {
   'terra-xhigh': { model: 'sonnet', effort: 'xhigh' },
   'sol-medium': { model: 'opus', effort: 'medium' },
   'sol-high': { model: 'claude-opus-5', effort: 'high' },
+  'sol-max': { model: 'fable', effort: 'max' },
   'sol-xhigh': { model: 'claude-opus-5', effort: 'xhigh' },
 }
 
@@ -202,8 +203,8 @@ ${JSON.stringify(preflightData, null, 2)}
       break
     }
 
-    // `sol-max` is not a valid Claude Code profile. Stop explicitly rather
-    // than silently substituting sol-xhigh or another weaker configuration.
+    // Stop explicitly when a host-specific recovery profile is unavailable;
+    // never silently substitute sol-xhigh or another weaker configuration.
     if (!recoveryProfile || !PROFILES[recoveryProfile]) {
       results.push({
         id: itemId,

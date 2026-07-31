@@ -155,6 +155,7 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("| `sol-max` | `gpt-5.6-sol` | `max` | `sol-high` |", text)
         self.assertIn("| `terra-medium` | `sonnet` | `medium` |", text)
         self.assertIn("| `sol-high` | `claude-opus-5` | `high` |", text)
+        self.assertIn("| `sol-max` | `fable` | `max` |", text)
         self.assertIn("| `sol-xhigh` | `claude-opus-5` | `xhigh` |", text)
         self.assertIn("Cursor resolves the regular profiles to `grok4.5 high`", text)
         self.assertIn("`claude-opus-5 high` and `claude-opus-5 xhigh`", text)
@@ -200,6 +201,7 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("const PROFILES = {", script_text)
         self.assertIn("'terra-medium': { model: 'sonnet', effort: 'medium' }", script_text)
         self.assertIn("'sol-high': { model: 'claude-opus-5', effort: 'high' }", script_text)
+        self.assertIn("'sol-max': { model: 'fable', effort: 'max' }", script_text)
         self.assertIn("'sol-xhigh': { model: 'claude-opus-5', effort: 'xhigh' }", script_text)
 
         # Verify core agent() calls for three steps
