@@ -18,6 +18,7 @@ child agent.
 | `terra-xhigh` | `gpt-5.6-terra` | `xhigh` | `terra-high` |
 | `sol-medium` | `gpt-5.6-sol` | `medium` | — |
 | `sol-high` | `gpt-5.6-sol` | `high` | `sol-medium` |
+| `sol-max` | `gpt-5.6-sol` | `max` | `sol-high` |
 | `sol-xhigh` | `gpt-5.6-sol` | `xhigh` | `sol-high` |
 
 The fallback column is an orchestrator-only exception, not a second planning
@@ -76,16 +77,24 @@ Do not silently replace an unavailable profile with a different profile.
 | `sol-high` | `claude-opus-5 high` |
 | `sol-xhigh` | `claude-opus-5 xhigh` |
 
-## Shared escalation order
+## Planning and review-recovery escalation
 
-Use this regular planning and escalation order on every host:
+Use this regular planning order on every host:
 
 `terra-medium` → `terra-high` → `sol-medium` → `sol-high`
 
 Treat every `xhigh` profile as an exception outside the regular ladder. Apply
 the gates in `../SKILL.md` before selecting one.
 
-Post-fix review escalation may advance exactly once to the next regular profile
-for a returned P0/P1 or explicitly blocking correctness, security, data-loss,
-or verification finding. It is not a capacity fallback, never jumps to `xhigh`,
-and stops rather than escalating again if the recovery review remains blocking.
+For one post-fix review recovery triggered by a returned P0/P1 or explicitly
+blocking correctness, security, data-loss, or verification finding, use this
+separate mapping:
+
+`terra-medium`, `terra-high`, and `sol-medium` → `sol-high`; `sol-high` →
+`sol-max`.
+
+`sol-max` is currently defined only for Codex as `gpt-5.6-sol` with `max`
+reasoning. Claude Code and Cursor must report the recovery as unavailable when
+it is requested; they must not substitute `sol-xhigh` or another profile. This
+is not a capacity fallback, never jumps to `xhigh`, and stops rather than
+escalating again if the recovery review remains blocking.

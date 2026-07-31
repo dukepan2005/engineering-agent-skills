@@ -58,9 +58,10 @@ const PROFILES = {
 // This is distinct from capacity fallback: a completed worker exposed a
 // blocking post-fix review finding, so recovery gets one stronger profile.
 const REVIEW_ESCALATION = {
-  'terra-medium': 'terra-high',
-  'terra-high': 'sol-medium',
+  'terra-medium': 'sol-high',
+  'terra-high': 'sol-high',
   'sol-medium': 'sol-high',
+  'sol-high': 'sol-max',
 }
 
 // Resolve profile ID to model + effort
@@ -195,6 +196,20 @@ ${JSON.stringify(preflightData, null, 2)}
     if (!recoveryProfile) {
       results.push({
         id: itemId, plannedProfile, effectiveProfile,
+        status: 'review_escalation_unavailable',
+        blockingFindings: deliveryOutcome.blockingFindings || [],
+      })
+      break
+    }
+
+    // `sol-max` is not a valid Claude Code profile. Stop explicitly rather
+    // than silently substituting sol-xhigh or another weaker configuration.
+    if (!recoveryProfile || !PROFILES[recoveryProfile]) {
+      results.push({
+        id: itemId,
+        plannedProfile,
+        effectiveProfile,
+        recoveryProfile: recoveryProfile || null,
         status: 'review_escalation_unavailable',
         blockingFindings: deliveryOutcome.blockingFindings || [],
       })

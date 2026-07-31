@@ -152,6 +152,7 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("## Codex", text)
         self.assertIn("## Claude Code", text)
         self.assertIn("## Cursor", text)
+        self.assertIn("| `sol-max` | `gpt-5.6-sol` | `max` | `sol-high` |", text)
         self.assertIn("| `terra-medium` | `sonnet` | `medium` |", text)
         self.assertIn("| `sol-high` | `claude-opus-5` | `high` |", text)
         self.assertIn("| `sol-xhigh` | `claude-opus-5` | `xhigh` |", text)
@@ -252,6 +253,12 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("review_escalation_required", script)
         self.assertIn("review_escalation_failed", script)
         self.assertIn("review_escalation_unavailable", script)
+        self.assertIn("`terra-medium`, `terra-high`, and `sol-medium` → `sol-high`.", skill)
+        self.assertIn("`sol-high` → `sol-max`.", skill)
+        self.assertIn("'terra-medium': 'sol-high'", script)
+        self.assertIn("'terra-high': 'sol-high'", script)
+        self.assertIn("'sol-medium': 'sol-high'", script)
+        self.assertIn("'sol-high': 'sol-max'", script)
 
 
 if __name__ == "__main__":
