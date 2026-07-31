@@ -245,6 +245,10 @@ Return the compact delivery summary with commit hash, changed areas,
 verification evidence, remaining work, and an acceptance-evidence table. Map
 each supplied acceptance criterion to concrete verification evidence, or state
 that it was not verified. Do not perform Azure Boards operations or closeout.
+Return structured JSON with `outcome` set to either `ready_for_closeout` or
+`review_escalation_required`. The latter is required when post-fix review still
+has a P0/P1 or another explicitly blocking correctness, security, data-loss, or
+verification finding; include the concrete findings and do not claim readiness.
 
 <preflight scope JSON>
 ```
@@ -255,6 +259,23 @@ the parent. Require the worker to finish before inspecting its result. Keep the
 shared workspace untouched while a worker runs. On failure, incomplete
 verification, uncommitted result, blocker, or uncertain outcome, stop
 immediately. Do not dispatch later work items.
+
+### Review Escalation
+
+If the implementation worker returns `review_escalation_required`, do not run
+closeout or dispatch the next work item. Resolve the current profile's one next
+regular profile through the canonical escalation order:
+
+`terra-medium` → `terra-high` → `sol-medium` → `sol-high`.
+
+Spawn exactly one recovery worker at that higher profile with the same work-item
+scope, the unresolved findings, and the current workspace. It must repair the
+existing task delta, rerun verification, use `$code-review`, and return the same
+structured outcome. Record planned, initial effective, and recovery profiles.
+Do not auto-select an `xhigh` profile, retry a second recovery worker, close the
+item, or dispatch later work while recovery is unresolved. If there is no next
+regular profile, the recovery worker fails, or its post-fix review still returns
+`review_escalation_required`, stop and report the blocker for human replanning.
 
 ### 3. Closeout — spawn cheap agent
 

@@ -55,6 +55,14 @@ const PROFILES = {
   'sol-xhigh': { model: 'claude-opus-5', effort: 'xhigh' },
 }
 
+// This is distinct from capacity fallback: a completed worker exposed a
+// blocking post-fix review finding, so recovery gets one stronger profile.
+const REVIEW_ESCALATION = {
+  'terra-medium': 'terra-high',
+  'terra-high': 'sol-medium',
+  'sol-medium': 'sol-high',
+}
+
 // Resolve profile ID to model + effort
 function resolveProfile(profileId) {
   const p = PROFILES[profileId]
@@ -62,6 +70,20 @@ function resolveProfile(profileId) {
     throw new Error(`Unknown profile ID: ${profileId}`)
   }
   return p
+}
+
+function parseDeliveryOutcome(result) {
+  const value = typeof result === 'string' ? JSON.parse(result) : result
+  if (!value || !['ready_for_closeout', 'review_escalation_required'].includes(value.outcome)) {
+    throw new Error('Implementation result must declare outcome ready_for_closeout or review_escalation_required')
+  }
+  if (value.outcome === 'ready_for_closeout' && !value.commit) {
+    throw new Error('ready_for_closeout requires a task commit')
+  }
+  if (value.outcome === 'review_escalation_required' && !Array.isArray(value.blockingFindings)) {
+    throw new Error('review_escalation_required requires blockingFindings')
+  }
+  return value
 }
 
 // Main delivery loop
@@ -85,7 +107,8 @@ for (let i = 0; i < plan.length; i++) {
   const itemId = item.id
   const itemType = item.type || 'Task'
   const plannedProfile = item.plannedProfile
-  const profileSpec = resolveProfile(plannedProfile)
+  let effectiveProfile = plannedProfile
+  let profileSpec = resolveProfile(effectiveProfile)
 
   log(`[${i + 1}/${plan.length}] ${itemId}: preflight → implement (${plannedProfile}) → closeout`)
 
@@ -134,7 +157,7 @@ for (let i = 0; i < plan.length; i++) {
 
   const implementPrompt = `Use \`$azure-task-implement\` to implement work item ${itemId} in the current workspace and branch. The preflight scope is provided below. Re-read repository authority; the planner is not a substitute for repo guidance. The effective execution profile is fixed for this worker. Do not perform Azure Boards operations.
 
-Return the compact delivery summary with commit hash, changed areas, verification evidence, remaining work, and an acceptance-evidence table. Map each supplied acceptance criterion to concrete verification evidence, or state that it was not verified. Do not perform Azure Boards operations or closeout.
+Return JSON only. Set outcome to ready_for_closeout only after fixing actionable review findings and completing post-fix review. If that review still has a P0/P1 or other blocking correctness, security, data-loss, or verification finding, set outcome to review_escalation_required and include blockingFindings. Do not perform Azure Boards operations or closeout.
 
 Preflight scope:
 \`\`\`json
@@ -159,7 +182,50 @@ ${JSON.stringify(preflightData, null, 2)}
     break // Stop sequence on implement failure
   }
 
+  let deliveryOutcome
+  try {
+    deliveryOutcome = parseDeliveryOutcome(implementResult)
+  } catch (e) {
+    results.push({ id: itemId, plannedProfile, effectiveProfile, status: 'implement_result_invalid', error: e.message })
+    break
+  }
+
+  if (deliveryOutcome.outcome === 'review_escalation_required') {
+    const recoveryProfile = REVIEW_ESCALATION[effectiveProfile]
+    if (!recoveryProfile) {
+      results.push({
+        id: itemId, plannedProfile, effectiveProfile,
+        status: 'review_escalation_unavailable',
+        blockingFindings: deliveryOutcome.blockingFindings || [],
+      })
+      break
+    }
+
+    phase('Review escalation')
+    const recoverySpec = resolveProfile(recoveryProfile)
+    const recoveryResult = await agent(
+      `Use \`$azure-task-implement\` for review recovery on work item ${itemId} in the current workspace and branch. A lower profile completed implementation but post-fix review remains blocking. Preserve the existing task delta, repair the supplied findings, rerun verification, and use \`$code-review\` again. Do not perform Azure Boards operations or closeout. Return JSON only with outcome ready_for_closeout or review_escalation_required.\n\nPreflight scope:\n\`\`\`json\n${JSON.stringify(preflightData, null, 2)}\n\`\`\`\n\nBlocking findings:\n\`\`\`json\n${JSON.stringify(deliveryOutcome.blockingFindings || [], null, 2)}\n\`\`\``,
+      { model: recoverySpec.model, effort: recoverySpec.effort, label: `review_recovery_${recoveryProfile}_${itemId}` }
+    )
+    if (!recoveryResult) {
+      results.push({ id: itemId, plannedProfile, effectiveProfile, recoveryProfile, status: 'review_escalation_failed', error: 'Recovery child failed or returned null' })
+      break
+    }
+    try {
+      deliveryOutcome = parseDeliveryOutcome(recoveryResult)
+    } catch (e) {
+      results.push({ id: itemId, plannedProfile, effectiveProfile, recoveryProfile, status: 'review_escalation_failed', error: e.message })
+      break
+    }
+    effectiveProfile = recoveryProfile
+    if (deliveryOutcome.outcome === 'review_escalation_required') {
+      results.push({ id: itemId, plannedProfile, effectiveProfile, status: 'review_escalation_failed', blockingFindings: deliveryOutcome.blockingFindings || [] })
+      break
+    }
+  }
+
   log(`✓ Implementation complete for ${itemId}`)
+  const implementationSummary = JSON.stringify(deliveryOutcome)
 
   // === STEP 3: Closeout ===
   phase('Closeout')
@@ -171,7 +237,7 @@ ${JSON.stringify(preflightData, null, 2)}
 Return the JSON output unchanged. Do not use \`--check-ac\`, and do not perform any non-Boards work.
 
 Implementation delivery summary:
-${implementResult}`
+${implementationSummary}`
 
   const closeoutResult = await agent(closeoutPrompt, {
     model: 'haiku',
@@ -184,10 +250,10 @@ ${implementResult}`
     results.push({
       id: itemId,
       plannedProfile,
-      effectiveProfile: plannedProfile,
+      effectiveProfile,
       status: 'closeout_failed',
       error: 'Closeout child failed or returned null',
-      implementSummary: implementResult.substring(0, 200),
+      implementSummary: implementationSummary.substring(0, 200),
     })
     break // Stop sequence on closeout failure
   }
@@ -198,9 +264,9 @@ ${implementResult}`
     id: itemId,
     type: itemType,
     plannedProfile,
-    effectiveProfile: plannedProfile,
+    effectiveProfile,
     status: 'completed',
-    implementSummary: implementResult.substring(0, 500),
+    implementSummary: implementationSummary.substring(0, 500),
     closeoutSummary: closeoutResult.substring(0, 200),
   })
 }

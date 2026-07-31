@@ -77,11 +77,13 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("Use `$tdd` where possible, at pre-agreed seams.", text)
         self.assertIn("Run typechecking regularly, single test files regularly,", text)
         self.assertIn("Once done, use `$code-review` to review the work.", text)
-        self.assertIn("Commit your work to the current branch.", text)
+        self.assertIn("review_escalation_required", text)
+        self.assertIn("P0 or P1", text)
+        self.assertIn("again against the repaired task delta", text)
+        self.assertIn("Otherwise commit your work to the current branch", text)
         self.assertNotIn("`$implement`", text)
         self.assertNotIn("orchestrator", text.lower())
         self.assertNotIn("preflight", text.lower())
-        self.assertNotIn("closeout", text.lower())
         self.assertNotIn("working-tree review mode", text)
         self.assertNotIn("skills/azure-task-implement/references", text)
 
@@ -231,6 +233,25 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("--project ${shellQuote(trackerConnection.project)}", script)
         self.assertNotIn("implement-preflight --id ${itemId}", script)
         self.assertNotIn("show --full --id ${itemId}", script)
+
+    def test_orchestrator_escalates_only_blocking_post_fix_review_findings(self) -> None:
+        skill = self.read_skill("azure-task-orchestrator")
+        script = (
+            REPO_ROOT
+            / "skills"
+            / "azure-task-orchestrator"
+            / "references"
+            / "claude-code-delivery-loop.js"
+        ).read_text()
+
+        self.assertIn("Review Escalation", skill)
+        self.assertIn("review_escalation_required", skill)
+        self.assertRegex(skill, r"do not run\s+closeout or dispatch the next work item")
+        self.assertIn("Do not auto-select an `xhigh` profile", skill)
+        self.assertIn("REVIEW_ESCALATION", script)
+        self.assertIn("review_escalation_required", script)
+        self.assertIn("review_escalation_failed", script)
+        self.assertIn("review_escalation_unavailable", script)
 
 
 if __name__ == "__main__":

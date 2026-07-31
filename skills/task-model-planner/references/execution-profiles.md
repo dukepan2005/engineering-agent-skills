@@ -26,7 +26,8 @@ the host explicitly reports that the requested reasoning effort or capacity is
 unavailable. The retry must use the listed profile, preserve the model, and be
 recorded with the planned profile, effective profile, and host error. A blank
 fallback stops the run. Never use it after a worker starts, for a work-item failure,
-or for a model-wide availability error.
+or for a model-wide availability error. This does not govern the separate,
+one-time post-fix-review escalation defined by `$azure-task-orchestrator`.
 
 ## Claude Code
 
@@ -83,3 +84,8 @@ Use this regular planning and escalation order on every host:
 
 Treat every `xhigh` profile as an exception outside the regular ladder. Apply
 the gates in `../SKILL.md` before selecting one.
+
+Post-fix review escalation may advance exactly once to the next regular profile
+for a returned P0/P1 or explicitly blocking correctness, security, data-loss,
+or verification finding. It is not a capacity fallback, never jumps to `xhigh`,
+and stops rather than escalating again if the recovery review remains blocking.
