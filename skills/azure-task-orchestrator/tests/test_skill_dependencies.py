@@ -54,12 +54,34 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("planning-snapshot --organization <organization> --project <project> --id <id>\n--id <id>", text)
         self.assertIn("direct New Task and Bug children", text)
         self.assertRegex(text, re.compile(r"Do not read a\s+non-New child"))
-        self.assertRegex(text, re.compile(r"Then\s+pass that composite snapshot to\s+`\$task-model-planner`"))
+        self.assertRegex(text, re.compile(r"Give `\$task-model-planner` the validated composite snapshot file"))
         self.assertIn("linked specification documents", text)
         self.assertIn("`linkedSpecifications` collection", text)
         self.assertIn("`{reference, material, content}` decision", text)
         self.assertIn("Accept both Task and Bug targets", text)
         self.assertIn("planner is\n   read-only planning logic; it must not read Azure Boards", text)
+
+    def test_orchestrator_uses_verified_file_handoff_for_large_snapshots(self) -> None:
+        text = self.read_skill("azure-task-orchestrator")
+
+        self.assertIn("run-scoped temporary directory", text)
+        self.assertIn('> "<tmpsnapshot>"', text)
+        self.assertIn("do not return the snapshot JSON", text)
+        self.assertIn('`jq -e . "<tmpsnapshot>"`', text)
+        self.assertIn("SHA-256", text)
+        self.assertIn("compact JSON manifest", text)
+        self.assertIn("byte count and SHA-256 match the manifest", text)
+        self.assertIn("`<tmpcomposite>`", text)
+        self.assertIn("inline an oversized snapshot", text)
+        self.assertIn("must delete it after planning succeeds or stops", text)
+
+    def test_planner_accepts_parent_validated_snapshot_file(self) -> None:
+        text = self.read_skill("task-model-planner")
+
+        self.assertIn("parent-validated JSON file", text)
+        self.assertIn("verified byte count", text)
+        self.assertIn("mismatched file as `Input not ready`", text)
+        self.assertIn("not permission to read Azure Boards", text)
 
     def test_planner_requires_type_specific_fields_when_description_is_absent(self) -> None:
         text = self.read_skill("task-model-planner")

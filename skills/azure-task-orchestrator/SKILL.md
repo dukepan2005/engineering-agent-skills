@@ -69,6 +69,13 @@ Before invoking `$task-model-planner`, the parent orchestrator must obtain one
 authoritative read-only snapshot through a direct `task-boards-ops` child. Do
 not ask the planner child to read Boards or to spawn another child.
 
+Create one new, run-scoped temporary directory on a filesystem shared by the
+parent and its Boards child. Reserve absolute paths `<tmpsnapshot>` and
+`<tmpcomposite>` inside it. Do not reuse a caller-supplied path or place these
+artifacts in the repository. The directory contains full tracker data, so the
+parent must delete it after planning succeeds or stops; do not retain it while
+waiting for plan confirmation.
+
 On Codex, prefer the currently available Luna model with
 `reasoning_effort=low`; if Luna is unavailable, use the currently available
 lightweight model, such as Terra with low reasoning. Do not treat a specific
@@ -85,12 +92,19 @@ Use `$azure-devops-boards-skill` in its semantic `task-boards-ops` role. For a
 Story, run `planning-snapshot --organization <organization> --project <project>
 --story <story-id>` once. The Story's state does
 not gate this read-only snapshot; the server-side query must select only its direct New Task and Bug children,
-then return
-one JSON snapshot containing the Story and every selected target. Do not read a
-non-New child. For an explicit set, run
+then write one JSON snapshot containing the Story and every selected target to
+`<tmpsnapshot>`. Do not read a non-New child. For an explicit set, run
 `planning-snapshot --organization <organization> --project <project> --id <id>
 --id <id>` once for the requested Task/Bug set;
-preserve the supplied order and do not invent a parent. For every included item
+preserve the supplied order and do not invent a parent. For either Story or
+explicit-set form, redirect the stdout of that one helper invocation unchanged to `<tmpsnapshot>` (for example,
+`> "<tmpsnapshot>"`); do not return the snapshot JSON in a tool result or final
+response, because a full snapshot can exceed host transport limits. After the
+helper exits successfully, validate the exact file with
+`jq -e . "<tmpsnapshot>"`, measure its byte count, and calculate its SHA-256.
+Return only one compact JSON manifest with the exact path, byte count, SHA-256,
+source kind/id, and ordered target IDs. If writing, validation, or manifest
+construction fails, return an error and do not substitute a summary. For every included item
 retain all fields, multiline formats, raw and
 normalized relations, attachments, linked references, full comments/discussion,
 and type-specific scope fields when Description is absent. Linked references
@@ -110,19 +124,28 @@ One Boards child may make the helper calls needed to build this single snapshot;
 never spawn one Boards child per ticket. Relations to excluded work items are
 dependency context only, not planner targets.
 
-If the snapshot child fails, returns incomplete data, or cannot spawn, stop
-before invoking the planner. The parent may use the Boards Skill's documented
-fallback only when the parent itself cannot spawn this direct Boards child.
+Before invoking the planner, the parent must validate that the returned manifest
+matches the reserved path; the file exists; `jq -e .` succeeds; and the measured
+byte count and SHA-256 match the manifest. It must parse the file itself to
+verify source kind/id and ordered target IDs before treating it as authoritative.
+Then merge accepted linked specification documents without rewriting the Boards
+JSON, write the composite snapshot to `<tmpcomposite>`, validate it as JSON,
+and provide that file plus its verified digest to `$task-model-planner`. Do not
+inline an oversized snapshot in a child prompt or tool result.
+
+If the snapshot child fails, returns an incomplete/invalid manifest, the file
+validation fails, or the snapshot is incomplete, stop before invoking the
+planner. The parent may use the Boards Skill's documented fallback only when
+the parent itself cannot spawn this direct Boards child.
 
 ## Build and Validate the Plan
 
-1. Merge the planning snapshot with the accepted linked specification documents
-   from the upstream planning authority, preserving the original Boards JSON
-   and adding a `linkedSpecifications` collection with one
+1. Give `$task-model-planner` the validated composite snapshot file from the
+   previous step. It must read the complete file as the parent-provided
+   authority, not Azure Boards. The composite preserves the original Boards JSON
+   and adds a `linkedSpecifications` collection with one
    `{reference, material, content}` decision per raw linked reference. A
-   material specification must have non-empty full Markdown `content`. Then
-   pass that composite snapshot to
-   `$task-model-planner`. The planner is
+   material specification must have non-empty full Markdown `content`. The planner is
    read-only planning logic; it must not read Azure Boards or spawn a Boards
    child. Treat its report as guidance, not tracker authority.
 2. Read `$task-model-planner`'s canonical execution-profile registry. Resolve

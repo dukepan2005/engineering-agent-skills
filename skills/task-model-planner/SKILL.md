@@ -10,7 +10,12 @@ tracker.
 
 ## Establish the Work Set
 
-1. Require an authoritative tracker snapshot from the parent. It must include
+1. Require an authoritative tracker snapshot from the parent. It may be provided
+   inline when bounded, or as a parent-validated JSON file in a filesystem shared
+   with this planner. For a file, require its exact path plus verified byte count
+   and SHA-256, read the complete file, and treat a missing, invalid, or digest-
+   mismatched file as `Input not ready`. A file supplied by the parent is scope
+   input, not permission to read Azure Boards. The snapshot must include
    the requested parent or target items, revisions, states, all fields and
    multiline formats, relations, comments/discussion, attachments, and raw
    linked specification references. When a referenced specification affects
