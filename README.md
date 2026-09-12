@@ -14,6 +14,7 @@ Codex, Claude Code, and Cursor.
 | `task-boards-ops` | Semantic role for a cheap Boards-only child: prefer an available Luna model, then a lightweight fallback such as Terra low; in Cursor, use the available lightweight Composer model or equivalent. Claude Code may optionally provide the [named agent](.claude/agents/task-boards-ops.md). |
 | [`task-model-planner`](skills/task-model-planner/) | Recommend one named, lowest-reliable execution profile from a parent-provided work-item snapshot and linked specification authority. |
 | [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver implementation-ready Azure Boards work items from a Story or an explicit item set with parent-owned flat implementation, two-axis review, repair, and closeout workers. |
+| [`explaining-code-changes`](skills/explaining-code-changes/) | Explain a commit or commit range (single SHA, `a..b`, or any git-diff-style revision argument) — what changed, what each piece does, and why — for ordinary/junior developers. |
 
 ## Review Dependency
 
