@@ -92,20 +92,53 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("`content`", text)
         self.assertIn("return `Input not ready`", text)
 
-    def test_implementation_embeds_the_local_implement_flow_only(self) -> None:
+    def test_implementation_preserves_standalone_and_parent_review_modes(self) -> None:
         text = self.read_skill("azure-task-implement")
 
-        self.assertIn("Implement the work described by the provided scope.", text)
+        self.assertIn("Implement the work described by the provided scope in the current workspace", text)
         self.assertIn("Use `$tdd` where possible, at pre-agreed seams.", text)
-        self.assertIn("Run typechecking regularly, single test files regularly,", text)
-        self.assertIn("Once done, use `$code-review` to review the work.", text)
+        self.assertIn("Run typechecking regularly,", text)
+        self.assertIn("single test files regularly,", text)
+        self.assertIn("`reviewOwner=self` (the backward-compatible default)", text)
+        self.assertIn("`reviewOwner=parent`", text)
+        self.assertRegex(text, r"do not invoke `\$code-review`, spawn review\s+agents")
+        self.assertIn('"outcome": "ready_for_review"', text)
+        self.assertIn('`{"outcome":"ready_for_closeout", ...}`', text)
         self.assertIn("review_escalation_required", text)
-        self.assertIn("P0 or P1", text)
-        self.assertIn("again against the repaired task delta", text)
-        self.assertIn("Otherwise commit your work to the current branch", text)
-        self.assertNotIn("`$implement`", text)
-        self.assertNotIn("orchestrator", text.lower())
-        self.assertNotIn("preflight", text.lower())
+        self.assertIn("P0/P1", text)
+        self.assertIn("again against the same `reviewBase...HEAD` delta", text)
+        self.assertIn("same task commit", text)
+        self.assertRegex(text, r"Do not perform Azure Boards\s+operations in either mode")
+        self.assertNotIn("working-tree review mode", text)
+        self.assertNotIn("skills/azure-task-implement/references", text)
+
+    def test_orchestrator_owns_flat_review_dispatch(self) -> None:
+        text = self.read_skill("azure-task-orchestrator")
+
+        self.assertRegex(text, r"parent\s+orchestrator owns the delivery control plane")
+        self.assertIn("No implementation or review worker may spawn another worker", text)
+        self.assertIn("two parallel read-only children", text)
+        self.assertIn("reviewOwner=parent", text)
+        self.assertIn("Review and repair — parent owns flat review dispatch", text)
+        self.assertIn("references/flat-review-worker.md", text)
+        self.assertIn("Promise.all", text)
+        self.assertNotIn("Let `$azure-task-implement` own that work item's implementation,\nverification, review, and commit.", text)
+
+    def test_flat_review_worker_contract_is_no_spawn_and_axis_scoped(self) -> None:
+        text = (
+            REPO_ROOT
+            / "skills"
+            / "azure-task-orchestrator"
+            / "references"
+            / "flat-review-worker.md"
+        ).read_text()
+
+        self.assertIn("parent starts exactly two read-only workers in", text)
+        self.assertIn("do not start children", text)
+        self.assertIn("reviewAxis", text)
+        self.assertIn("reviewBase", text)
+        self.assertIn("no_spec_available", text)
+        self.assertIn("Return JSON only", text)
         self.assertNotIn("working-tree review mode", text)
         self.assertNotIn("skills/azure-task-implement/references", text)
 
@@ -113,7 +146,8 @@ class SkillDependencyContractTests(unittest.TestCase):
         text = self.read_skill("azure-task-orchestrator")
 
         self.assertIn("Read the current full Description", text)
-        self.assertIn("explicit implementation evidence", text)
+        self.assertIn("current-code evidence", text)
+        self.assertIn("explicit current-code implementation evidence", text)
         self.assertIn("--description-file <tmpdescription>", text)
         self.assertRegex(text, r"--comment-file\s+<tmpcomment>")
         self.assertNotIn("never pass `--check-ac` or `--description-file`", text)
@@ -134,20 +168,19 @@ class SkillDependencyContractTests(unittest.TestCase):
     def test_orchestrator_spawns_claude_code_children_through_workflow(self) -> None:
         text = self.read_skill("azure-task-orchestrator")
 
-        self.assertIn(
-            "the bare `Agent` tool cannot set reasoning\neffort explicitly",
+        self.assertRegex(
             text,
+            r"the bare `Agent` tool cannot set reasoning\s+effort\s+explicitly",
         )
         self.assertIn("agent(prompt, {model: 'haiku', effort: 'low'})", text)
-        self.assertIn("agent(prompt,\n{model, effort, label})`", text)
+        self.assertRegex(text, r"agent\(prompt, \{model, effort, label\}\)")
         self.assertIn("Claude Code has no pre-start capacity", text)
 
-        # A Workflow script has no pause point for user input, so it must not
-        # be asked to span the pre-confirmation planning steps: only the
-        # post-confirmation per-item delivery loop may run inside one.
+        # The planning loop still stays in the conversation; only the
+        # post-confirmation flat delivery loop runs inside one Workflow.
         self.assertIn("no pause point for user input", text)
         self.assertIn(
-            "single `Workflow` script invoked once after the user confirms the plan",
+            "this entire post-confirmation loop runs as one `Workflow`",
             text,
         )
         self.assertNotIn(
@@ -226,10 +259,14 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("'sol-max': { model: 'claude-opus-5', effort: 'max' }", script_text)
         self.assertIn("'sol-xhigh': { model: 'claude-opus-5', effort: 'xhigh' }", script_text)
 
-        # Verify core agent() calls for three steps
+        # Verify core agent() calls for the flat stages.
         self.assertIn("agent(", script_text)
         self.assertIn("preflight", script_text.lower())
         self.assertIn("implement", script_text.lower())
+        self.assertIn("Promise.all", script_text)
+        self.assertIn("reviewAxis", script_text)
+        self.assertIn("reviewBase", script_text)
+        self.assertIn("reviewOwner=parent", script_text)
         self.assertIn("closeout", script_text.lower())
 
         # Verify script returns a report structure
@@ -271,7 +308,7 @@ class SkillDependencyContractTests(unittest.TestCase):
 
         self.assertIn("Review Escalation", skill)
         self.assertIn("review_escalation_required", skill)
-        self.assertRegex(skill, r"do not run\s+closeout or dispatch the next work item")
+        self.assertRegex(skill, r"do not run\s+closeout or\s+dispatch the next work item")
         self.assertIn("Do not auto-select an `xhigh` profile", skill)
         self.assertIn("REVIEW_ESCALATION", script)
         self.assertIn("review_escalation_required", script)

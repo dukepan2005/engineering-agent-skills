@@ -1,13 +1,16 @@
 ---
 name: azure-task-orchestrator
-description: Plan and deliver implementation-ready Azure DevOps Boards work items under a Story or in an explicit item set, in dependency order. Use when the user wants the task-model-planner skill to choose a named execution profile for each item, then wants each item delivered by the azure-task-implement skill in a sequential subagent with that exact profile.
+description: Plan and deliver implementation-ready Azure DevOps Boards work items under a Story or in an explicit item set, in dependency order. Use when the user wants the task-model-planner skill to choose a named execution profile for each item, then wants the parent orchestrator to control implementation, flat two-axis review, repair, and closeout workers with that exact profile.
 ---
 
 # Azure Task Orchestrator
 
 Create one read-only execution-profile plan, validate it, obtain the user's
-confirmation, then run exactly one Azure work-item delivery worker at a time.
-Do not implement, review, or close work items in the orchestrator itself.
+confirmation, then deliver exactly one Azure work item at a time. The parent
+orchestrator owns the delivery control plane: it directly starts the
+implementation worker, both read-only review-axis workers, any repair worker,
+and the Boards closeout worker. It does not edit code or author review
+findings itself. No implementation or review worker may spawn another worker.
 
 ## Require Skills and Spawn Control Before Work
 
@@ -19,28 +22,25 @@ catalog. Do not require the user to provide an installation path or paste a
 Skill body. If the host reports a required Skill as unavailable, stop before
 reading tracker data, code, or Git state and report that missing Skill.
 
-Also require a subagent spawn primitive that accepts an explicit model and
-reasoning effort. Boards children use the semantic `task-boards-ops` role
-defined by `$azure-devops-boards-skill`; no named-agent configuration is
-required.
+Also require a parent-level spawn primitive that accepts an explicit model and
+reasoning effort, can launch two review workers in parallel, and returns their
+results to this conversation. Boards children use the semantic
+`task-boards-ops` role defined by `$azure-devops-boards-skill`; no named-agent
+configuration is required. The capability must be available in the parent;
+do not rely on a child inheriting a spawn tool.
 
-On Codex, use `spawn_agent` with `model` and `reasoning_effort` for every
-profiled child. On Claude Code, the bare `Agent` tool cannot set reasoning
-effort explicitly, so a profiled child must be spawned through a `Workflow`
-script's `agent(prompt, {model, effort})` call instead. A `Workflow` script
-runs as one asynchronous unit with no pause point for user input, so it can
-only wrap steps that run after the user's plan confirmation: the per-item
-preflight/implement/closeout loop in **Deliver Sequentially**. The planning
-snapshot and the planner call happen before that confirmation and must stay in
-the main conversation loop so the parent can inspect each result and pause for
-confirmation before continuing. On Claude Code, the snapshot child is a spawn,
-so it uses a single-child `Workflow` call with exactly one `agent()` inside it
-(or the host's single-child-spawn equivalent); the planner is invoked as a
-Skill in the current context, not as a spawned child. On
-another host, use its equivalent only when it can set both values for each
-child. Stop without reading or changing code, Git state, or Azure Boards if no
-usable spawn primitive is available. Do not silently run the work item in the
-parent agent or fall back to the parent's profile.
+On Codex, the parent uses `spawn_agent` with `model` and `reasoning_effort` for
+every profiled implementation or repair child and for both review-axis
+children. On Claude Code, the bare `Agent` tool cannot set reasoning effort
+explicitly, so profiled children must be started through the delivery
+`Workflow` script's `agent(prompt, {model, effort, label})` calls. The Workflow
+has no pause point for user input and must call those agents itself; neither an implementation child nor a review
+child may call `Agent`, `Workflow`, or another spawn primitive. On another host,
+use its equivalent only when the parent can set both values and collect the
+parallel review results. Stop without reading or changing code, Git state, or
+Azure Boards if the parent cannot provide this flat dispatch capability. Do
+not silently run the work item in the parent agent or fall back to the
+parent's profile.
 
 ## Freeze Tracker Connection Before Spawning Boards Children
 
@@ -83,8 +83,8 @@ model ID as a universal requirement. On Claude Code, use one `Workflow` call
 whose script makes exactly one
 `agent(prompt, {model: 'haiku', effort: 'low'})` call. This snapshot step runs
 in the main loop, before the user confirms the plan, so use a single-child
-`Workflow` call here rather than folding it into the per-item delivery
-`Workflow` described in **Deliver Sequentially**. Give it the Story or explicit
+`Workflow` call here rather than folding it into the post-confirmation flat
+delivery `Workflow` described in **Flat delivery control plane**. Give it the Story or explicit
 work-item set and this self-contained instruction:
 
 ```text
@@ -186,24 +186,34 @@ If the user changes a work item's scope, order, or profile before confirming,
 invalidate the plan and return to **Build and Validate the Plan**. A changed
 plan requires a newly displayed plan and new confirmation.
 
-## Deliver Sequentially
+## Flat delivery control plane
 
-For each work item in the validated execution plan, run three sequential steps.
-Only one work item at a time. Do not start the next work item until the current
-one is complete.
+For each work item in the validated execution plan, run the stages below in
+order. Only one work item may be active at a time. The parent starts every
+child directly; no child may start another child.
 
-On Claude Code, this entire loop — every work item's preflight, implement, and
-closeout step, for every item in the validated plan — runs as the body of a
-single `Workflow` script invoked once after the user confirms the plan. Do not
-open a new `Workflow` call per step or per item; call `agent()` sequentially
-inside that one script so each item's three steps complete, in order, before
-the next item's steps begin. No user input is needed once this script starts,
-since confirmation already happened in the main loop before it was invoked.
+| Stage | Parent-started children | Child responsibility |
+| --- | --- | --- |
+| Preflight | one cheap Boards child | read-only tracker snapshot |
+| Implement | one planned-profile child | implementation, tests, task commit |
+| Review round | two parallel read-only children | Standards axis and Spec axis |
+| Repair | one planned-profile child, only when findings exist | amend the same task commit and rerun verification |
+| Final review | two parallel read-only children | verify the repaired delta |
+| Recovery | one mapped stronger-profile child, only for blocking final findings | repair the existing delta; no review dispatch |
+| Closeout | one cheap Boards child | evidence-backed Description update and close |
 
-See [references/claude-code-delivery-loop.js](references/claude-code-delivery-loop.js)
-for the complete Workflow script template. The script takes the validated plan,
-preflight results, and planner report as `args`, and returns an ordered delivery
-report with completion status for each work item.
+Use [references/flat-review-worker.md](references/flat-review-worker.md) as the
+worker contract for both review axes. The parent may validate and aggregate
+the returned JSON, but must not inspect the code itself to author findings or
+silently downgrade a review result.
+
+On Claude Code, this entire post-confirmation loop runs as one `Workflow`
+script. The script calls `agent()` directly for every child, uses
+`Promise.all` for each pair of review axes, and never asks an implementation or
+review child to call `Agent` or `Workflow`. On Codex, the main conversation
+uses `spawn_agent` directly for the same sequence. See
+[references/claude-code-delivery-loop.js](references/claude-code-delivery-loop.js)
+for the complete template.
 
 ### 1. Preflight — spawn cheap agent
 
@@ -259,54 +269,90 @@ profile ID, relevant planner evidence and order reason, and the preflight scope
 from step 1, plus this instruction:
 
 ```text
-Use `$azure-task-implement` to implement work item <id> in the current workspace
-and branch. The preflight scope is provided below. Re-read repository authority;
-the planner is not a substitute for repo guidance. The effective execution
-profile is fixed for this worker. Do not perform Azure Boards operations.
+Use `$azure-task-implement` with `reviewOwner=parent` to implement work item
+<id> in the current workspace and branch. The preflight scope is provided
+below. Re-read repository authority; the planner is not a substitute for repo
+guidance. The effective execution profile is fixed for this worker. Do not
+perform Azure Boards operations, invoke `$code-review`, or spawn any child.
 
-Return the compact delivery summary with commit hash, changed areas,
-verification evidence, remaining work, and an acceptance-evidence table. Map
-each supplied acceptance criterion to concrete verification evidence, or state
-that it was not verified. Do not perform Azure Boards operations or closeout.
-Return structured JSON with `outcome` set to either `ready_for_closeout` or
-`review_escalation_required`. The latter is required when post-fix review still
-has a P0/P1 or another explicitly blocking correctness, security, data-loss, or
-verification finding; include the concrete findings and do not claim readiness.
+Return JSON with `outcome` set to `ready_for_review` only after implementation,
+verification, the task-only commit, and the acceptance-evidence table are
+complete. Include `reviewBase`/`taskStartCommit`, `commit`, changed areas,
+verification evidence, remaining work, and map every supplied acceptance
+criterion to concrete evidence or state that it was not verified. If
+implementation or verification fails, return `implementation_failed` with the
+concrete blocker; do not claim review or closeout readiness.
 
 <preflight scope JSON>
 ```
 
-Let `$azure-task-implement` own that work item's implementation,
-verification, review, and commit. Do not duplicate any of those operations in
-the parent. Require the worker to finish before inspecting its result. Keep the
-shared workspace untouched while a worker runs. On failure, incomplete
-verification, uncommitted result, blocker, or uncertain outcome, stop
-immediately. Do not dispatch later work items.
+Require the worker to finish before inspecting its result. Validate that the
+result is `ready_for_review`, that `reviewBase` and `taskStartCommit` match,
+that the commit exists, and that the acceptance-evidence table is present.
+Keep the shared workspace untouched while a worker runs. On failure,
+incomplete verification, an uncommitted result, a blocker, or an uncertain
+outcome, stop immediately. Do not dispatch later work items.
+
+### 3. Review and repair — parent owns flat review dispatch
+
+For each review round, the parent starts two read-only children in parallel,
+one with `reviewAxis=standards` and one with `reviewAxis=spec`, using the exact
+`reviewBase` and current task commit returned by the implementation worker.
+Give both workers the work-item scope, acceptance evidence, and
+[the flat worker contract](references/flat-review-worker.md). They must return
+the contract's JSON without editing code, Git, Boards, or spawning children.
+On Codex, prefer the currently available Luna model with
+`reasoning_effort=low`, then a lightweight Terra fallback; on Claude Code use
+`agent(prompt, {model: 'haiku', effort: 'low', label})` for both axes.
+
+Validate both axis labels, the fixed point, and the non-empty diff before
+aggregating. A malformed or mismatched review result is a failed review, not a
+clean result. The parent may combine the reports and pass them to a repair
+worker, but must not author findings or change the code itself.
+
+Run a first review round immediately after implementation. If it contains any
+actionable finding, spawn one repair worker at the same effective profile with
+`reviewOwner=parent`, the original preflight scope, `reviewBase`, current task
+commit, and both complete review reports. Require it to repair the existing
+delta, rerun verification, and amend the same task commit; it must not invoke
+`$code-review`, spawn a child, create a second task commit, or perform Boards
+operations. If the repair fails, stop. Whether or not repair was needed, run a
+second pair of review workers against the resulting `reviewBase...HEAD` delta.
+
+If the second review has no blocking finding, the parent may mark the item
+`ready_for_closeout` while retaining both axis reports and any non-blocking
+findings in the delivery evidence. A blocking finding is P0/P1 or an explicitly
+blocking correctness, security, data-loss, or verification problem. Do not
+close the item or dispatch the next item while the second review is malformed
+or unresolved.
 
 ### Review Escalation
 
-If the implementation worker returns `review_escalation_required`, do not run
-closeout or dispatch the next work item. Use this review-recovery mapping, not
-the normal planning ladder:
+If the second flat review still has a blocking finding, do not run closeout or
+dispatch the next work item. Use this review-recovery mapping, not the normal
+planning ladder:
 
 `terra-medium`, `terra-high`, and `sol-medium` → `sol-high`.
 
 `sol-high` → `sol-max`.
 
 Spawn exactly one recovery worker at that higher profile with the same work-item
-scope, the unresolved findings, and the current workspace. It must repair the
-existing task delta, rerun verification, use `$code-review`, and return the same
-structured outcome. Record planned, initial effective, and recovery profiles.
+scope, the unresolved findings, and the current workspace. It must use
+`$azure-task-implement` with `reviewOwner=parent`, repair the existing task
+delta, rerun verification, and amend the same task commit. It must not invoke
+`$code-review`, spawn a child, or perform Boards operations. After recovery,
+the parent starts exactly one more pair of flat review workers. Record planned,
+initial effective, and recovery profiles.
 On Codex, `sol-max` resolves to `gpt-5.6-sol` / `max`; on Claude Code, it
 resolves to `claude-opus-5` / `max`. A host that cannot resolve it must report
 `review_escalation_unavailable`; it must not substitute `sol-xhigh` or another
 profile. Do not auto-select an `xhigh` profile, retry a second recovery worker,
 close the item, or dispatch later work while recovery is unresolved. If no mapped
-recovery profile is available, the recovery worker fails, or its post-fix review
-still returns `review_escalation_required`, stop and report the blocker for human
-replanning.
+recovery profile is available, the recovery worker fails, or its final flat
+review still has a blocking finding, return `review_escalation_required` with
+the concrete findings and stop for human replanning.
 
-### 3. Closeout — spawn cheap agent
+### 4. Closeout — spawn cheap agent
 
 On Codex, prefer the currently available Luna model with
 `reasoning_effort=low`; if Luna is unavailable, use the currently available
@@ -315,17 +361,22 @@ model ID as a universal requirement. On Claude Code, use
 `agent(prompt, {model: 'haiku', effort: 'low'})`.
 
 Closeout policy (apply before spawning):
+- The parent (or a standalone closeout agent) must map every Acceptance
+  criterion to current-code evidence: file/type/function, plus the required
+  test seam when the AC asks for one. That mapping is the only explicit current-code implementation evidence
+  that may check an item. An implementation summary, commit title, PR merge,
+  or “tests passed” claim is not enough.
 - Read the current full Description and preserve its non-checklist content and
   formatting. Mark an unchecked Markdown checklist item as checked only when
-  the implementation summary provides explicit implementation evidence for
-  that criterion. Do not infer evidence from the item's final state, commit
-  title, or a general success claim.
-- If an unchecked checklist item lacks explicit evidence, or its text cannot
-  be mapped unambiguously to the acceptance-evidence table, stop without
+  that code mapping exists and matches the criterion text. Do not infer
+  evidence from the item's final state, commit title, or a general success
+  claim.
+- If an unchecked checklist item lacks code evidence, or its text cannot
+  be mapped unambiguously to a concrete implementation, stop without
   closing the item. Do not overwrite the Description or post a completion
   comment.
 - Write the resulting Description to a temporary Markdown file and write a
-  completion comment from the implementation summary to another temporary
+  completion comment from the code-vs-AC mapping to another temporary
   Markdown file.
 - Close the work item to `Closed`: pass `--state Closed`. If repository guidance
   names a different terminal state for a non-Task type, use that stated value.
@@ -336,13 +387,13 @@ Closeout policy (apply before spawning):
   stale revision stops the closeout.
 
 Give the agent the work-item ID, the preflight revision from step 1, the
-implementation delivery summary, and this self-contained instruction:
+code-vs-AC mapping, and this self-contained instruction:
 
 ```text
 Use `$azure-devops-boards-skill` in its semantic `task-boards-ops` role. Read
 the current full Description with `show --organization <organization> --project
 <project> --full --id <id>`. Apply only the evidence-backed Markdown checklist
-changes specified by the implementation summary, preserving all other
+changes specified by the parent code-vs-AC mapping, preserving all other
 Description content. Write the rewritten Description to `<tmpdescription>` and
 a Markdown completion comment to `<tmpcomment>`. Then run `close-task --apply
 --organization <organization> --project <project> --id <id> --expected-rev
@@ -358,13 +409,15 @@ since preflight, so the current item must be re-preflighted and the
 implementation result reconciled before closeout is attempted again. Do not
 proceed to the next work item.
 
-Dispatch the next work item only after all three steps complete successfully.
+Dispatch the next work item only after implementation, every required flat
+review/repair stage, and closeout complete successfully.
 
 ## Report
 
 Return one ordered summary. For every completed work item, include the planned
 and effective execution profile IDs, any pre-start capacity fallback error
-(Codex only), worker-reported commit and verification, final tracker state,
-and closeout result. For a stopped run, identify the work item that stopped
-the sequence, retain earlier completed results, and state that later work
-items were not dispatched.
+(Codex only), `reviewBase`, worker-reported commit and verification, both
+review-round axis reports, any repair/recovery profile, final tracker state,
+and closeout result. For a stopped run, identify the work item and stage that
+stopped the sequence, retain earlier completed results, and state that later
+work items were not dispatched.

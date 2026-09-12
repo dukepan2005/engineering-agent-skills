@@ -13,14 +13,18 @@ Codex, Claude Code, and Cursor.
 | [`azure-task-implement`](skills/azure-task-implement/) | Implement code from a provided specification or ticket scope. |
 | `task-boards-ops` | Semantic role for a cheap Boards-only child: prefer an available Luna model, then a lightweight fallback such as Terra low; in Cursor, use the available lightweight Composer model or equivalent. Claude Code may optionally provide the [named agent](.claude/agents/task-boards-ops.md). |
 | [`task-model-planner`](skills/task-model-planner/) | Recommend one named, lowest-reliable execution profile from a parent-provided work-item snapshot and linked specification authority. |
-| [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver implementation-ready Azure Boards work items from a Story or an explicit item set: preflight via cheap agent, implement via named-profile agent, closeout via cheap agent. |
+| [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver implementation-ready Azure Boards work items from a Story or an explicit item set with parent-owned flat implementation, two-axis review, repair, and closeout workers. |
 
 ## Review Dependency
 
-`azure-task-implement` embeds the local workflow from Matt Pocock's
-`$implement` Skill. It does not require that Skill to be model-invocable. The
-embedded workflow uses `$code-review` before committing, so the host must make
-that Skill available in the same catalog.
+`azure-task-implement` preserves the local implementation workflow from Matt
+Pocock's `$implement` Skill. It supports a standalone `reviewOwner=self` mode
+that keeps the `$code-review` handoff, and a parent-owned `reviewOwner=parent`
+mode used by the Azure orchestrator. In the latter mode the implementation
+worker does not spawn review children; the parent launches the two review axes
+directly. The host must make `$code-review` available for standalone mode;
+the orchestrator's flat review workers use the bundled axis contract and do not
+invoke the external coordinator.
 
 The orchestrator also requires this repository's `$task-model-planner`,
 `$azure-task-implement`, and `$azure-devops-boards-skill`. The parent
@@ -88,27 +92,34 @@ $azure-task-orchestrator AB#168
 
 It first reads one planning snapshot through a direct `task-boards-ops` child,
 then combines that Boards snapshot with any linked specification documents from
-the accepted planning authority before invoking the read-only planner. For each work item it
-runs three sequential subagents:
+the accepted planning authority before invoking the read-only planner. For each
+work item the parent controls a flat sequence:
 1. **Preflight** (cheap model, low reasoning) — reads the current Azure Boards
    item and returns a structured scope snapshot.
-2. **Implement** (planner-specified model) — follows `$azure-task-implement`'s
-   direct code, test, review, and commit workflow.
-3. **Closeout** (cheap model, low reasoning) — checks evidence-backed
+2. **Implement** (planner-specified model) — runs `$azure-task-implement` in
+   `reviewOwner=parent` mode for code, tests, and one task commit.
+3. **Review** (two cheap workers in parallel) — runs the Standards and Spec
+   axes without allowing either worker to spawn children.
+4. **Repair and review** — sends findings back to the implementation worker,
+   amends the same commit, and repeats both review axes; one mapped stronger
+   recovery worker is allowed only for blocking findings.
+5. **Closeout** (cheap model, low reasoning) — checks evidence-backed
    Description checklist items, posts the completion comment, and closes the
    work item with optimistic revision checking.
 
 Use `$azure-task-implement` whenever a specification or ticket scope is already
-available and only local implementation work is required. In the three-stage
-Azure delivery flow, the orchestrator supplies that scope to its implementation
-worker.
+available and only local implementation work is required. In the flat Azure
+delivery flow, the orchestrator supplies that scope and explicitly selects
+`reviewOwner=parent`.
 
 #### Dependencies
 
 These wrappers do not bundle or install their review dependency.
 
 - `$azure-task-implement` requires `$code-review` from the same host Skill
-  catalog. It does not require `$implement`.
+  catalog for standalone `reviewOwner=self` use. The orchestrator's flat
+  review workers use their bundled axis contract. It does not require
+  `$implement`.
 - `$azure-task-orchestrator` requires `$task-model-planner`,
   `$azure-task-implement`, and `$azure-devops-boards-skill`.
 
@@ -139,17 +150,18 @@ $azure-task-orchestrator <Story-or-explicit-work-item-set>
 ```
 
 The orchestrator resolves each profile ID through `$task-model-planner`'s
-canonical registry, then runs three sequential subagents per work item:
-preflight (cheap model), implement (planner-specified model), closeout (cheap
-model). It validates and displays the planner's ordered report, waits for
-explicit user confirmation before dispatching, and stops the sequence on the
-first unsuccessful worker. It never substitutes the parent model or runs work
-items in parallel.
+canonical registry, then runs the flat parent-controlled sequence per work item:
+preflight, implementation, two-axis review, repair/review, and closeout. It
+validates and displays the planner's ordered report, waits for explicit user
+confirmation before dispatching, and stops the sequence on the first
+unsuccessful stage. It never substitutes the parent model or runs work items in
+parallel.
 
-`$azure-task-implement` supplies its own implementation workflow and invokes
-`$code-review` by Skill name before commit. The semantic
-`task-boards-ops` role isolates Boards mechanics; the planning Skill never edits
-code, Git state, or Azure Boards.
+`$azure-task-implement` supplies its own implementation workflow. Standalone
+use keeps its self-owned review mode; orchestrated use explicitly selects
+`reviewOwner=parent`, leaving review dispatch to the parent. The semantic
+`task-boards-ops` role isolates Boards mechanics; review workers are read-only,
+and the planning Skill never edits code or Git state itself.
 
 ## Development
 
