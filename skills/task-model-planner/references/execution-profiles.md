@@ -13,6 +13,7 @@ child agent.
 
 | Profile ID | Model | Reasoning effort | Pre-start capacity fallback |
 |---|---|---|---|
+| `luna-max` | `gpt-5.6-luna` | `max` | — |
 | `terra-medium` | `gpt-5.6-terra` | `medium` | — |
 | `terra-high` | `gpt-5.6-terra` | `high` | `terra-medium` |
 | `terra-xhigh` | `gpt-5.6-terra` | `xhigh` | `terra-high` |
@@ -35,6 +36,9 @@ one-time post-fix-review escalation defined by `$azure-task-orchestrator`.
 Claude Code has no pre-start capacity error signal, so there is no fallback
 column: if the requested `model`/`effort` combination is unavailable, the
 orchestrator stops the run instead of retrying with a substitute profile.
+
+`luna-max` is Codex-only. A Claude Code planner must not select it or replace
+it with a superficially similar Claude profile.
 
 | Profile ID | Model | Reasoning effort |
 |---|---|---|
@@ -68,6 +72,9 @@ metadata only. If Cursor exposes a different current label for these
 configurations, use that host-provided label without changing the profile ID.
 Do not silently replace an unavailable profile with a different profile.
 
+`luna-max` is Codex-only. A Cursor planner must not select it or substitute a
+Cursor configuration.
+
 | Profile ID | Cursor configuration |
 |---|---|
 | `terra-medium` | `grok4.5 high` |
@@ -86,12 +93,15 @@ Use this regular planning order on every host:
 Treat every `xhigh` profile as an exception outside the regular ladder. Apply
 the gates in `../SKILL.md` before selecting one.
 
+`luna-max` is a Codex-only qualified candidate outside this ladder. Select it
+only when the separate Luna gates in `../SKILL.md` are all met.
+
 For one post-fix review recovery triggered by a returned P0/P1 or explicitly
 blocking correctness, security, data-loss, or verification finding, use this
 separate mapping:
 
-`terra-medium`, `terra-high`, and `sol-medium` → `sol-high`; `sol-high` →
-`sol-max`.
+`luna-max`, `terra-medium`, `terra-high`, and `sol-medium` → `sol-high`;
+`sol-high` → `sol-max`.
 
 `sol-max` resolves to `gpt-5.6-sol` with `max` reasoning on Codex and
 `claude-opus-5` with `max` effort on Claude Code. Cursor must report this

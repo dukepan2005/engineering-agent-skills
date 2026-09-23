@@ -332,7 +332,7 @@ If the second flat review still has a blocking finding, do not run closeout or
 dispatch the next work item. Use this review-recovery mapping, not the normal
 planning ladder:
 
-`terra-medium`, `terra-high`, and `sol-medium` → `sol-high`.
+`luna-max`, `terra-medium`, `terra-high`, and `sol-medium` → `sol-high`.
 
 `sol-high` → `sol-max`.
 

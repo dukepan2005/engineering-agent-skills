@@ -147,6 +147,25 @@ Use this regular escalation order:
 Therefore `sol-medium` is the immediate next regular profile after
 `terra-high`. Do not use an `xhigh` profile as part of this regular ladder.
 
+### Qualified Luna max candidate (Codex only)
+
+`luna-max` is outside the regular ladder. Choose it only when every condition
+below is evidenced:
+
+1. The work is tightly bounded to a clear, repeatable implementation slice;
+   its product semantics, ownership, and interfaces are already fixed.
+2. It has no cross-repository contract change, migration, security-sensitive
+   decision, concurrency/lifecycle hazard, or other material non-local
+   invariant.
+3. Focused tests or deterministic checks make an incorrect implementation
+   quickly observable and cheap to correct.
+4. The remaining work still needs a long local reasoning loop, such as dense
+   edge-case handling or exhaustive deterministic test construction.
+
+Do not choose `luna-max` merely for cost, ticket size, or multiple files. If a
+gate is missing, choose from the regular ladder. `luna-max` is unavailable on
+Claude Code and Cursor; do not substitute another host's model for it.
+
 ### Choose Terra or Sol
 
 Choose Terra when the specification has already fixed the intended behavior,
@@ -196,8 +215,9 @@ Use `xhigh` only when all of these gates are evidenced:
 
 Otherwise cap the initial effort at `high`. Treat `sol-high` as a compounded
 case, not the default Sol profile, and treat every `xhigh` profile as
-exceptional. Do not invent profiles, and do not recommend `max` as an initial
-profile.
+exceptional. Do not invent profiles. `luna-max` is the only `max` initial
+profile and requires every qualified-Luna gate above; `sol-max` remains a
+review-recovery profile only.
 
 ## Explain Every Recommendation
 
