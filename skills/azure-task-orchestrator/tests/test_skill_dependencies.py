@@ -92,6 +92,20 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("`content`", text)
         self.assertIn("return `Input not ready`", text)
 
+    def test_planner_requires_current_model_docs_and_benchmark_evidence(self) -> None:
+        text = self.read_skill("task-model-planner")
+
+        self.assertIn("## Verify Model and Evaluation Evidence", text)
+        self.assertIn("**Official model documentation.**", text)
+        self.assertIn("**Benchmark reports.**", text)
+        self.assertIn("latest relevant report", text)
+        self.assertIn("original report or benchmark maintainer's results", text)
+        self.assertIn("exact model version, reasoning effort, and agent/harness", text)
+        self.assertIn("do not make an exact-model or cross-model performance claim", text)
+        self.assertIn("compare effort levels", text)
+        self.assertIn("performance benefit is unverified", text)
+        self.assertIn("## Model and evaluation evidence", text)
+
     def test_implementation_preserves_standalone_and_parent_review_modes(self) -> None:
         text = self.read_skill("azure-task-implement")
 

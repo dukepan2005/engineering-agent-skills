@@ -5,6 +5,8 @@ Date: 2026-07-18
 > Historical calibration only. Model availability and profile IDs in this
 > report reflect the research date; the current runtime options are defined in
 > [the execution-profile registry](../skills/task-model-planner/references/execution-profiles.md).
+> For live model and benchmark evidence, use the planner's current-source
+> preflight and [the 2026-09-23 evidence snapshot](model-profile-evidence-sources-2026-09-23.md).
 
 ## Question
 

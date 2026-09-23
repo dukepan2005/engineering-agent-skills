@@ -82,6 +82,58 @@ If an artifact is missing or materially inconsistent, return an
 without recommending profiles. Do not compensate for an incomplete planning
 workflow by selecting Sol or a higher reasoning effort.
 
+## Verify Model and Evaluation Evidence
+
+Before recommending a profile, consult both required source types using the
+latest information available on the planning date:
+
+1. **Official model documentation.** Check the provider's current model
+   documentation and, when using a host such as Claude Code or Cursor, that
+   host's current model/effort availability documentation. Confirm the model or
+   alias, supported reasoning efforts, and host-specific limits. The
+   execution-profile registry remains the approved mapping for this workflow;
+   provider API options alone do not expand the host-approved choices.
+2. **Benchmark reports.** Read the latest relevant report for coding, agentic
+   coding, or the work item's closest task category. Prefer results for the
+   exact model version, reasoning effort, and agent/harness in use. Consult an
+   independent, reproducible evaluation when one is available; vendor-published
+   reports are useful but must be identified as vendor-reported. Use the
+   original report or benchmark maintainer's results and methodology; secondary
+   summaries may help locate a source but are not evidence by themselves.
+
+Supplement these sources with model/system cards and release notes, benchmark
+methodology or leaderboard documentation, and representative project-level
+blind evaluations or delivery-history measurements when available. These help
+interpret the required sources; they do not replace them.
+
+For every benchmark result used, capture the report date and direct source, the
+exact model/version and effort, benchmark and revision, harness/tool access, and
+any reported sample size or uncertainty. Note whether comparisons use the same
+harness, self-reported results, or an independent evaluator. Benchmark results
+describe the tested setup, not a universal model ranking or a substitute for the
+work-item risk and verification analysis below. Do not infer a model or effort
+ranking from names, version numbers, or a single score.
+
+When using benchmark evidence to claim that a stronger model or effort is worth
+selecting over a lower-cost option, prefer a matched comparison on the same task
+set, harness, and tool access. For an effort-level claim, compare effort levels
+of the same model under matched conditions. If the report does not provide that
+comparison, state that the performance benefit is unverified.
+
+If no report covers the exact current model/configuration, state that plainly.
+You may cite the closest relevant report as a proxy, but label the mismatch and
+do not make an exact-model or cross-model performance claim from it. Never
+present a report for an older model version as evidence for a newer one. If the
+official docs or active host show that a registry profile is unavailable or
+resolve it to a materially different model/effort, do not invent a profile or
+silently substitute another; report the discrepancy and stop profile selection
+until the approved mapping is resolved.
+
+Use this evidence together with the task's residual uncertainty, failure cost,
+and verification strength. Where representative project evaluations or
+delivery-history measurements exist, use them as additional evidence for the
+project's actual workload; do not let general benchmark scores override them.
+
 ## Keep the Analysis Read-Only
 
 - Do not edit code, documents, Git state, configuration, or tracker items.
@@ -263,6 +315,15 @@ Use this structure:
 - Source, revision, state, and relations
 - Documents and code inspected
 - Missing or conflicting authority
+
+## Model and evaluation evidence
+- Official model and host documentation: title, URL, publication/update date
+  or access date, model/alias, supported effort, and relevant limits
+- Benchmark reports consulted: title, URL, date, model/version, effort,
+  benchmark revision, harness, relevant result, and limitations
+- Exact-match status: whether the current host configuration was evaluated;
+  identify any proxy or unavailable evidence
+- Project-specific evaluations or delivery-history evidence, when available
 
 ## Recommendations
 
