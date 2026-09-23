@@ -10,7 +10,7 @@
 //     "id": "AB#123",
 //     "type": "Task",
 //     "title": "...",
-//     "plannedProfile": "sol-medium",
+//     "plannedProfile": "opus-medium",
 //     "orderReason": "..."
 //   }],
 //   "trackerConnection": {
@@ -35,22 +35,22 @@ export const meta = {
 
 // Execution profile registry: profile ID → {model, effort}
 const PROFILES = {
-  'terra-medium': { model: 'sonnet', effort: 'medium' },
-  'terra-high': { model: 'sonnet', effort: 'high' },
-  'terra-xhigh': { model: 'sonnet', effort: 'xhigh' },
-  'sol-medium': { model: 'opus', effort: 'medium' },
-  'sol-high': { model: 'claude-opus-5', effort: 'high' },
-  'sol-max': { model: 'claude-opus-5', effort: 'max' },
-  'sol-xhigh': { model: 'claude-opus-5', effort: 'xhigh' },
+  'sonnet-medium': { model: 'sonnet', effort: 'medium' },
+  'sonnet-high': { model: 'sonnet', effort: 'high' },
+  'sonnet-xhigh': { model: 'sonnet', effort: 'xhigh' },
+  'opus-medium': { model: 'opus', effort: 'medium' },
+  'opus-high': { model: 'opus', effort: 'high' },
+  'opus-max': { model: 'opus', effort: 'max' },
+  'opus-xhigh': { model: 'opus', effort: 'xhigh' },
 }
 
 // A completed flat review still has a blocking finding; recovery gets one
 // stronger profile. This is not a normal planning-ladder fallback.
 const REVIEW_ESCALATION = {
-  'terra-medium': 'sol-high',
-  'terra-high': 'sol-high',
-  'sol-medium': 'sol-high',
-  'sol-high': 'sol-max',
+  'sonnet-medium': 'opus-high',
+  'sonnet-high': 'opus-high',
+  'opus-medium': 'opus-high',
+  'opus-high': 'opus-max',
 }
 
 function resolveProfile(profileId) {

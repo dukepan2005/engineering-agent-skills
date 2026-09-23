@@ -9,21 +9,24 @@ value the planner and orchestrator exchange; each host resolves it into its
 own model/effort pair or combined model configuration only when spawning the
 child agent.
 
-## Codex
+## Codex / ChatGPT
 
 | Profile ID | Model | Reasoning effort | Pre-start capacity fallback |
 |---|---|---|---|
-| `luna-max` | `gpt-5.6-luna` | `max` | — |
-| `terra-medium` | `gpt-5.6-terra` | `medium` | — |
-| `terra-high` | `gpt-5.6-terra` | `high` | `terra-medium` |
-| `terra-xhigh` | `gpt-5.6-terra` | `xhigh` | `terra-high` |
-| `sol-medium` | `gpt-5.6-sol` | `medium` | — |
-| `sol-high` | `gpt-5.6-sol` | `high` | `sol-medium` |
-| `sol-max` | `gpt-5.6-sol` | `max` | `sol-high` |
-| `sol-xhigh` | `gpt-5.6-sol` | `xhigh` | `sol-high` |
+| `luna-high` | `gpt-6-luna` | `high` | — |
+| `luna-xhigh` | `gpt-6-luna` | `xhigh` | `luna-high` |
+| `luna-max` | `gpt-6-luna` | `max` | — |
+| `sol-medium` | `gpt-6-sol` | `medium` | — |
+| `sol-high` | `gpt-6-sol` | `high` | `sol-medium` |
+| `sol-xhigh` | `gpt-6-sol` | `xhigh` | `sol-high` |
 
-The fallback column is an orchestrator-only exception, not a second planning
-recommendation. It permits one retry only before a worker starts and only when
+Codex/ChatGPT offer `high`, `xhigh`, and `max` for GPT-6 Luna, and `medium`,
+`high`, and `xhigh` for GPT-6 Sol. Sol `max` and Luna `medium` are not valid
+combinations on Codex/ChatGPT.
+
+The fallback column applies to planned, profiled workers; it is an
+orchestrator-only exception, not a second planning recommendation. It permits
+one retry only before a worker starts and only when
 the host explicitly reports that the requested reasoning effort or capacity is
 unavailable. The retry must use the listed profile, preserve the model, and be
 recorded with the planned profile, effective profile, and host error. A blank
@@ -37,24 +40,20 @@ Claude Code has no pre-start capacity error signal, so there is no fallback
 column: if the requested `model`/`effort` combination is unavailable, the
 orchestrator stops the run instead of retrying with a substitute profile.
 
-`luna-max` is Codex-only. A Claude Code planner must not select it or replace
-it with a superficially similar Claude profile.
+Use Claude model-specific profile IDs:
 
 | Profile ID | Model | Reasoning effort |
 |---|---|---|
-| `terra-medium` | `sonnet` | `medium` |
-| `terra-high` | `sonnet` | `high` |
-| `terra-xhigh` | `sonnet` | `xhigh` |
-| `sol-medium` | `opus` | `medium` |
-| `sol-high` | `claude-opus-5` | `high` |
-| `sol-max` | `claude-opus-5` | `max` |
-| `sol-xhigh` | `claude-opus-5` | `xhigh` |
+| `sonnet-medium` | `sonnet` | `medium` |
+| `sonnet-high` | `sonnet` | `high` |
+| `sonnet-xhigh` | `sonnet` | `xhigh` |
+| `opus-medium` | `opus` | `medium` |
+| `opus-high` | `opus` | `high` |
+| `opus-max` | `opus` | `max` |
+| `opus-xhigh` | `opus` | `xhigh` |
 
-Claude Code's `terra` family uses `sonnet` (cost-optimized reasoning),
-`sol-medium` uses `opus`; `sol-high`, `sol-max`, and `sol-xhigh` use
-`claude-opus-5` at their respective efforts. The exceptional higher-reasoning
-profiles are reserved for cases where deep reasoning, high-consequence judgment,
-and weaker verification converge.
+Use `opus-max` only for the single post-fix recovery mapped below; do not
+select it for regular planning.
 
 `model` and `effort` here are exactly the `opts.model` and `opts.effort`
 fields of a `Workflow` script's `agent()` call. The bare `Agent` tool cannot
@@ -64,47 +63,60 @@ tool directly.
 
 ## Cursor
 
-Cursor resolves the regular profiles to `grok4.5 high`. The two exceptional
-high-reasoning profiles use Cursor's `claude-opus-5 high` and `claude-opus-5 xhigh`
-configurations. The Cursor mapping intentionally does not preserve the
-profile's separate reasoning-effort semantics; the profile ID remains planner
-metadata only. If Cursor exposes a different current label for these
-configurations, use that host-provided label without changing the profile ID.
-Do not silently replace an unavailable profile with a different profile.
+Cursor supports Composer 2.5 without a reasoning-effort setting, plus Grok 4.6
+and Grok 4.7 at `high` or `xhigh`. Leave effort unset for Composer 2.5. Use the
+model selected in the current host configuration; do not infer a capability
+ranking or automatic fallback between Grok versions. Use the exact model and
+effort from the selected profile.
 
-`luna-max` is Codex-only. A Cursor planner must not select it or substitute a
-Cursor configuration.
-
-| Profile ID | Cursor configuration |
-|---|---|
-| `terra-medium` | `grok4.5 high` |
-| `terra-high` | `grok4.5 high` |
-| `terra-xhigh` | `grok4.5 high` |
-| `sol-medium` | `grok4.5 high` |
-| `sol-high` | `claude-opus-5 high` |
-| `sol-xhigh` | `claude-opus-5 xhigh` |
+| Profile ID | Cursor model | Reasoning effort |
+|---|---|---|
+| `composer2.5` | `composer2.5` | — |
+| `grok4.6-high` | `grok4.6` | `high` |
+| `grok4.6-xhigh` | `grok4.6` | `xhigh` |
+| `grok4.7-high` | `grok4.7` | `high` |
+| `grok4.7-xhigh` | `grok4.7` | `xhigh` |
 
 ## Planning and review-recovery escalation
 
-Use this regular planning order on every host:
+For Codex/ChatGPT, use `luna-high`, `sol-medium`, or `sol-high` according to
+the model-family and effort guidance in `../SKILL.md`. For Claude Code, use a
+Sonnet profile when material decisions are resolved and an Opus profile when
+residual judgment or deeper implementation reasoning remains. For Cursor,
+choose the host-configured Grok version and a supported effort. Treat `xhigh`
+profiles as exceptions and apply the gates in `../SKILL.md` before selecting
+one.
 
-`terra-medium` → `terra-high` → `sol-medium` → `sol-high`
-
-Treat every `xhigh` profile as an exception outside the regular ladder. Apply
-the gates in `../SKILL.md` before selecting one.
-
-`luna-max` is a Codex-only qualified candidate outside this ladder. Select it
-only when the separate Luna gates in `../SKILL.md` are all met.
+Select `luna-max` only on Codex/ChatGPT and only when the separate Luna gates
+in `../SKILL.md` are all met.
 
 For one post-fix review recovery triggered by a returned P0/P1 or explicitly
 blocking correctness, security, data-loss, or verification finding, use this
-separate mapping:
+separate mapping. Do not automatically select an `xhigh` profile for recovery.
 
-`luna-max`, `terra-medium`, `terra-high`, and `sol-medium` → `sol-high`;
-`sol-high` → `sol-max`.
+Codex/ChatGPT:
 
-`sol-max` resolves to `gpt-5.6-sol` with `max` reasoning on Codex and
-`claude-opus-5` with `max` effort on Claude Code. Cursor must report this
-recovery as unavailable when requested; it must not substitute `sol-xhigh` or
-another profile. This is not a capacity fallback, never jumps to `xhigh`, and
-stops rather than escalating again if the recovery review remains blocking.
+`luna-high`, `luna-max`, `sol-medium` → `sol-high`.
+
+`luna-xhigh`, `sol-high`, and `sol-xhigh` have no recovery mapping; report
+recovery as unavailable.
+
+Claude Code:
+
+`sonnet-medium`, `sonnet-high`, `opus-medium` → `opus-high`; `opus-high` →
+`opus-max`.
+
+Claude Code has no recovery mapping for `sonnet-xhigh`, `opus-max`, or
+`opus-xhigh`; report recovery as unavailable rather than substituting another
+profile.
+
+Cursor:
+
+Cursor defines no post-fix recovery mapping. Report recovery as unavailable
+rather than selecting a different Grok version or automatically choosing
+`xhigh`.
+
+These are single post-fix-review recovery steps, not capacity fallbacks. A host
+must report recovery as unavailable if it cannot resolve the mapped profile; it
+must not substitute another profile. Stop if the recovery review remains
+blocking.

@@ -17,12 +17,12 @@ class TaskBoardsOpsRoutingTests(unittest.TestCase):
         self.assertRegex(text, r"Do not use\s+`ALL_TOOLS` or the absence of an Azure MCP tool")
         self.assertIn("`sh \"$HELPER\"`", text)
 
-    def test_cursor_prefers_a_lightweight_composer_model(self):
+    def test_cursor_uses_composer_2_5_without_effort(self):
         text = SKILL.read_text()
 
         self.assertIn("On Cursor", text)
-        self.assertIn("lightweight Composer model", text)
-        self.assertRegex(text, r"Do not require a\s+specific Composer model ID")
+        self.assertIn("use `composer2.5`", text)
+        self.assertIn("reasoning-effort setting, so leave effort unset", text)
 
 
 if __name__ == "__main__":

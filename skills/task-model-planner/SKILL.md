@@ -120,36 +120,39 @@ For each ready work item, assess only source-backed evidence:
 
 Read [the canonical execution-profile registry](references/execution-profiles.md)
 before selecting a profile. Output only its profile ID; do not output a free-form
-model and thinking-level pair. The registry resolves that profile separately for
-Codex, Claude Code, and Cursor; do not infer a host-specific model from the
-profile name.
+model and thinking-level pair. The registry resolves that profile separately
+for Codex/ChatGPT, Claude Code, and Cursor; do not infer a host-specific model
+from the profile name.
 
-Choose the model family and reasoning effort independently. Use these four
-profiles for regular planning:
+Choose the model family and reasoning effort independently for each host.
+For Codex/ChatGPT, use these regular profiles:
 
-- `terra-medium`: decisions are resolved and execution is straightforward or
-  mechanical;
-- `terra-high`: decisions are resolved but implementation retains a material
-  reasoning hazard or several interdependent changes;
+- `luna-high`: decisions are resolved and focused verification can catch a
+  wrong implementation; Codex/ChatGPT do not offer a lower Luna effort;
 - `sol-medium`: material residual judgment remains, but the decision is bounded
   and no deep implementation hazard is present;
 - `sol-high`: residual judgment and deep implementation reasoning are both
   required.
 
-Treat `terra-high` and `sol-medium` as the two primary profiles for agent-ready
-work items. Use `terra-medium` for genuinely straightforward work and
-`sol-high` for the compounded case.
+Treat `luna-high` and `sol-medium` as the two primary Codex/ChatGPT profiles
+for agent-ready work items. Use `sol-high` when residual judgment and deep
+implementation reasoning both remain. Neither primary profile is an automatic
+fallback for the other.
 
-Use this regular escalation order:
+For Claude Code, prefer a Sonnet profile when material decisions are resolved;
+use Opus when source-backed residual judgment or a deeper implementation
+hazard remains. For Cursor, use the model selected in the host configuration:
+Composer 2.5 has no effort setting, while Grok 4.6 and 4.7 support `high` and
+`xhigh`. Do not infer a capability ranking or fallback from model names or
+version numbers. If no model is configured, ask which one to use. All profile
+IDs and supported effort settings are defined in the registry.
 
-`terra-medium` → `terra-high` → `sol-medium` → `sol-high`
+Use only profile IDs supported by the current host registry; never infer or
+create an additional model-and-effort combination.
 
-Therefore `sol-medium` is the immediate next regular profile after
-`terra-high`. Do not use an `xhigh` profile as part of this regular ladder.
+### Qualified Luna max candidate (Codex/ChatGPT only)
 
-### Qualified Luna max candidate (Codex only)
-
-`luna-max` is outside the regular ladder. Choose it only when every condition
+`luna-max` is outside the regular profiles. Choose it only when every condition
 below is evidenced:
 
 1. The work is tightly bounded to a clear, repeatable implementation slice;
@@ -163,17 +166,20 @@ below is evidenced:
    edge-case handling or exhaustive deterministic test construction.
 
 Do not choose `luna-max` merely for cost, ticket size, or multiple files. If a
-gate is missing, choose from the regular ladder. `luna-max` is unavailable on
-Claude Code and Cursor; do not substitute another host's model for it.
+gate is missing, choose `luna-high`, `sol-medium`, or `sol-high` according to
+the evidence. This profile exists only for Codex/ChatGPT; on another host,
+select from that host's registry without substituting a different model for it.
 
-### Choose Terra or Sol
+### Choose the Model Family
 
-Choose Terra when the specification has already fixed the intended behavior,
-ownership, contracts, and rollout semantics, and focused verification makes an
-incorrect implementation cheap to detect. This remains true when mechanical or
-independently verifiable edits span multiple modules or repositories.
+For Codex/ChatGPT, choose Luna when the specification has already fixed the
+intended behavior, ownership, contracts, and rollout semantics, and focused
+verification makes an incorrect implementation cheap to detect. This remains
+true when mechanical or independently verifiable edits span multiple modules
+or repositories.
 
-Choose Sol only when source-backed residual judgment remains, such as:
+For Claude Code, choose Sonnet when the specification resolves material
+decisions; choose Opus when source-backed residual judgment remains, such as:
 
 - the specification, work item, current code, or another current authority
   conflicts;
@@ -185,22 +191,28 @@ Choose Sol only when source-backed residual judgment remains, such as:
 - ownership, lifecycle, security, migration, or compatibility semantics remain
   unresolved.
 
-Treat cross-boundary scope as a prompt to inspect the seam, never as a Sol
-trigger by itself.
+For Codex/ChatGPT, these residual-judgment cases are Sol triggers. On Cursor,
+follow the configured model and apply effort only where that model supports it.
+Treat cross-boundary scope as a prompt to inspect the seam, never as a
+model-family trigger by itself.
 
 ### Choose Reasoning Effort
 
-Use `medium` when the reasoning path is bounded, feedback is strong, and no
-material non-local invariant must remain correct across many steps. Select
-`terra-medium` only for mechanical or straightforward execution after the
-specification has resolved all material decisions.
+On Codex/ChatGPT, use `medium` only with Sol. Select `sol-medium` when residual
+judgment is bounded, feedback is strong, and no material non-local invariant
+must remain correct across many steps. On Claude Code, use the model-specific
+Sonnet or Opus profile and effort listed in the registry. On Cursor, select
+`high` or `xhigh` for Grok profiles; Composer 2.5 has no reasoning-effort
+setting.
 
 Use `high` when one material reasoning hazard or several interdependent
 implementation decisions remain, including concurrency, ordering, lifecycle,
 retry/idempotency, a coordinated migration or compatibility transition,
-non-local invariants, or repeated hypothesis-and-test loops. Select `sol-high`
-only when this deeper implementation reasoning combines with a Sol judgment
-gate.
+non-local invariants, or repeated hypothesis-and-test loops. Select
+`luna-high` when these hazards remain but the specification has resolved
+material judgment; select `sol-high` when deeper implementation reasoning
+combines with a Sol judgment gate. Apply the equivalent host-specific model and
+effort profiles from the registry on Claude Code and Cursor.
 
 Use `xhigh` only when all of these gates are evidenced:
 
@@ -214,10 +226,11 @@ Use `xhigh` only when all of these gates are evidenced:
    of this work-item class show a material benefit over `high`.
 
 Otherwise cap the initial effort at `high`. Treat `sol-high` as a compounded
-case, not the default Sol profile, and treat every `xhigh` profile as
-exceptional. Do not invent profiles. `luna-max` is the only `max` initial
-profile and requires every qualified-Luna gate above; `sol-max` remains a
-review-recovery profile only.
+case, not the default Sol profile, and treat host-supported `xhigh` profiles as
+exceptional. Do not invent profiles. `luna-max` is the only `max` profile for
+Codex/ChatGPT and requires every qualified-Luna gate above; Sol does not offer
+`max` on those hosts. Claude Code's separate recovery mapping is documented in
+the registry.
 
 ## Explain Every Recommendation
 
@@ -255,7 +268,7 @@ Use this structure:
 
 | Work item | Scope summary | Execution profile | Why not lower | Confidence |
 |---|---|---|---|---|
-| AB#... | ... | terra-medium | ... | high |
+| AB#... | ... | profile-id | ... | high |
 
 ## Work-item analysis
 

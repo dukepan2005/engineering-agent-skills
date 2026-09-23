@@ -15,11 +15,11 @@ agent reads.
 
 When the current prompt does **not** assign the semantic `task-boards-ops`
 role, your first action on an Azure Boards request is to spawn one isolated
-child and assign that role. On Codex, prefer the currently available Luna
-model with `reasoning_effort=low`; if Luna is unavailable, use the currently
-available lightweight model, such as Terra with low reasoning. Do not treat a
-specific model ID as a universal requirement or infer that spawning is
-unavailable solely because one ID cannot be selected. On Claude Code, use
+child and assign that role. On Codex/ChatGPT, prefer GPT-6 Luna with
+`reasoning_effort=high`; if it is unavailable, use GPT-6 Sol with
+`reasoning_effort=medium`. Do not treat a specific model ID as a universal
+requirement or infer that spawning is unavailable solely because one ID cannot
+be selected. On Claude Code, use
 `agent(prompt, {model: 'haiku', effort: 'low'})` inside a `Workflow` script;
 the bare `Agent` tool cannot set `effort` explicitly. If the caller is itself
 already running inside a `Workflow` script (for example, when the
@@ -27,9 +27,8 @@ already running inside a `Workflow` script (for example, when the
 Code), make this call from within that same script rather than opening a
 second one. A host may use a named `task-boards-ops` agent when available, but
 named-agent configuration is not required. On Cursor, when isolated child
-execution is available, use the currently available lightweight Composer model
-(or an equivalent lightweight model) for the Boards child. Do not require a
-specific Composer model ID.
+execution is available, use `composer2.5` for the Boards child. It has no
+reasoning-effort setting, so leave effort unset.
 
 The spawn instruction must be self-contained. Tell the child to use
 `$azure-devops-boards-skill` in the semantic role and name the exact operation

@@ -23,24 +23,26 @@ Skill body. If the host reports a required Skill as unavailable, stop before
 reading tracker data, code, or Git state and report that missing Skill.
 
 Also require a parent-level spawn primitive that accepts an explicit model and
-reasoning effort, can launch two review workers in parallel, and returns their
-results to this conversation. Boards children use the semantic
+its supported reasoning effort, can launch two review workers in parallel,
+and returns their results to this conversation. Boards children use the semantic
 `task-boards-ops` role defined by `$azure-devops-boards-skill`; no named-agent
 configuration is required. The capability must be available in the parent;
 do not rely on a child inheriting a spawn tool.
 
-On Codex, the parent uses `spawn_agent` with `model` and `reasoning_effort` for
-every profiled implementation or repair child and for both review-axis
-children. On Claude Code, the bare `Agent` tool cannot set reasoning effort
+On Codex/ChatGPT, the parent uses `spawn_agent` with `model` and
+`reasoning_effort` for every profiled implementation or repair child and for
+both review-axis children. On Claude Code, the bare `Agent` tool cannot set reasoning effort
 explicitly, so profiled children must be started through the delivery
 `Workflow` script's `agent(prompt, {model, effort, label})` calls. The Workflow
 has no pause point for user input and must call those agents itself; neither an implementation child nor a review
-child may call `Agent`, `Workflow`, or another spawn primitive. On another host,
-use its equivalent only when the parent can set both values and collect the
-parallel review results. Stop without reading or changing code, Git state, or
-Azure Boards if the parent cannot provide this flat dispatch capability. Do
-not silently run the work item in the parent agent or fall back to the
-parent's profile.
+child may call `Agent`, `Workflow`, or another spawn primitive. On Cursor, use
+its equivalent only when the parent can set the exact model and supported
+effort from the registry (omit effort for Composer 2.5) and collect the
+parallel review results. On any other host, use its equivalent only when the
+parent can set the exact profile configuration and collect those results. Stop
+without reading or changing code, Git state, or Azure Boards if the parent
+cannot provide this flat dispatch capability. Do not silently run the work item
+in the parent agent or fall back to the parent's profile.
 
 ## Freeze Tracker Connection Before Spawning Boards Children
 
@@ -63,6 +65,18 @@ Boards command. Pass `--team <team>` only to `current-sprint` or a create flow
 that resolves the current Sprint. The values are project input, never literals
 embedded in this reusable skill.
 
+## Host-specific Helper-Agent Profiles
+
+Use the matching profile for planning snapshot, preflight, flat-review, and
+closeout helper agents:
+
+- Codex/ChatGPT: prefer GPT-6 Luna with `reasoning_effort=high`; if it cannot
+  be spawned, use GPT-6 Sol with `reasoning_effort=medium`.
+- Claude Code: use `haiku` with `effort: 'low'` for these bounded helper roles.
+- Cursor: use `composer2.5` and leave reasoning effort unset.
+
+The chosen host-specific helper profile applies at every helper stage below.
+
 ## Planning Snapshot — spawn task-boards-ops
 
 Before invoking `$task-model-planner`, the parent orchestrator must obtain one
@@ -76,12 +90,10 @@ artifacts in the repository. The directory contains full tracker data, so the
 parent must delete it after planning succeeds or stops; do not retain it while
 waiting for plan confirmation.
 
-On Codex, prefer the currently available Luna model with
-`reasoning_effort=low`; if Luna is unavailable, use the currently available
-lightweight model, such as Terra with low reasoning. Do not treat a specific
-model ID as a universal requirement. On Claude Code, use one `Workflow` call
-whose script makes exactly one
-`agent(prompt, {model: 'haiku', effort: 'low'})` call. This snapshot step runs
+Use the shared host-specific helper-agent profile above. On Claude Code, use
+one `Workflow` call whose script makes exactly one
+`agent(prompt, {model: 'haiku', effort: 'low'})` call. On Cursor, spawn one
+child with model `composer2.5` and no effort field. This snapshot step runs
 in the main loop, before the user confirms the plan, so use a single-child
 `Workflow` call here rather than folding it into the post-confirmation flat
 delivery `Workflow` described in **Flat delivery control plane**. Give it the Story or explicit
@@ -170,9 +182,10 @@ the parent itself cannot spawn this direct Boards child.
 
 Before spawning any worker, present the complete validated plan in its planned
 order. For every work item, include its ID, type, title, planned profile ID,
-resolved model and reasoning effort, and order reason. On Codex, also include
-the pre-start capacity fallback profile if any; Claude Code has no such
-fallback, so omit that column there.
+resolved model and supported reasoning effort (or `unset` when the model has
+no effort setting), and order reason. On Codex/ChatGPT, also include the
+pre-start capacity fallback profile if any; Claude Code and Cursor have no
+such fallback, so omit that column there.
 State that confirmation authorizes sequential delivery, including code changes,
 one commit per successful work item, and Azure Boards closeout.
 
@@ -210,19 +223,19 @@ silently downgrade a review result.
 On Claude Code, this entire post-confirmation loop runs as one `Workflow`
 script. The script calls `agent()` directly for every child, uses
 `Promise.all` for each pair of review axes, and never asks an implementation or
-review child to call `Agent` or `Workflow`. On Codex, the main conversation
-uses `spawn_agent` directly for the same sequence. See
+review child to call `Agent` or `Workflow`. On Codex/ChatGPT, the main
+conversation uses `spawn_agent` directly for the same sequence. On Cursor, use
+its parent-level dispatch equivalent for the same sequence when the capability
+preflight above succeeds. See
 [references/claude-code-delivery-loop.js](references/claude-code-delivery-loop.js)
 for the complete template.
 
-### 1. Preflight — spawn cheap agent
+### 1. Preflight — spawn helper agent
 
-On Codex, prefer the currently available Luna model with
-`reasoning_effort=low`; if Luna is unavailable, use the currently available
-lightweight model, such as Terra with low reasoning. Do not treat a specific
-model ID as a universal requirement. On Claude Code, use
-`agent(prompt, {model: 'haiku', effort: 'low'})`. Give it the
-work-item ID and this self-contained instruction:
+Use the shared host-specific helper-agent profile above. On Claude Code, use
+`agent(prompt, {model: 'haiku', effort: 'low'})`; on Cursor, use model
+`composer2.5` without an effort field. Give it the work-item ID and this
+self-contained instruction:
 
 ```text
 Use `$azure-devops-boards-skill` in its semantic `task-boards-ops` role. Run
@@ -244,21 +257,25 @@ proceed to the implement step.
 ### 2. Implement — spawn planner-specified agent
 
 Resolve the work item's planned profile ID through the canonical registry for
-the current host (Codex or Claude Code). On Codex, call `spawn_agent` with its
-exact `model` and `reasoning_effort`, and a normalized `task_name` containing
+the current host. On Codex/ChatGPT, call
+`spawn_agent` with its exact `model` and `reasoning_effort`, and a normalized
+`task_name` containing
 the work-item ID and planned profile, for example `delivery_sol_xhigh_ab_175`.
 The name is only a task label; it does not select a custom agent
 configuration. On Claude Code, call the `Workflow` script's `agent(prompt,
 {model, effort, label})` with the profile's exact Claude Code `model`/`effort`
-mapping, and a `label` containing the work-item ID and planned profile.
+mapping. On Cursor, use the exact Cursor model and effort from the registry;
+omit the effort field when the selected model is Composer 2.5. Include a label
+or task name containing the work-item ID and planned profile.
 
 If the host rejects that spawn before the worker starts and explicitly reports
 the requested reasoning effort or capacity as unavailable, read the planned
 profile's `Pre-start capacity fallback` from the canonical registry. This
-fallback column exists for Codex only; Claude Code has no pre-start capacity
-error signal, so on Claude Code any such rejection stops the sequence
-immediately with no retry. On Codex, when the fallback has a value, retry
-exactly once with that profile's exact mapping and a new `task_name`. Record
+fallback column exists for Codex/ChatGPT only. Claude Code has no pre-start
+capacity error signal, and Cursor defines no pre-start fallback, so either
+host stops immediately on a rejected spawn. On Codex/ChatGPT, when the fallback
+has a value, retry exactly once with that profile's exact mapping and a new
+`task_name`. Record
 both profile IDs and the host error. If it has no value, the error is
 model-wide availability, the error is not recognizable, or the retry fails,
 stop the sequence. Do not retry after a worker begins, across models, or for a
@@ -301,9 +318,9 @@ one with `reviewAxis=standards` and one with `reviewAxis=spec`, using the exact
 Give both workers the work-item scope, acceptance evidence, and
 [the flat worker contract](references/flat-review-worker.md). They must return
 the contract's JSON without editing code, Git, Boards, or spawning children.
-On Codex, prefer the currently available Luna model with
-`reasoning_effort=low`, then a lightweight Terra fallback; on Claude Code use
-`agent(prompt, {model: 'haiku', effort: 'low', label})` for both axes.
+Use the shared host-specific helper-agent profile above; on Claude Code use
+`agent(prompt, {model: 'haiku', effort: 'low', label})` for both axes. On
+Cursor, use `composer2.5` without an effort field for both axes.
 
 Validate both axis labels, the fixed point, and the non-empty diff before
 aggregating. A malformed or mismatched review result is a failed review, not a
@@ -329,12 +346,10 @@ or unresolved.
 ### Review Escalation
 
 If the second flat review still has a blocking finding, do not run closeout or
-dispatch the next work item. Use this review-recovery mapping, not the normal
-planning ladder:
-
-`luna-max`, `terra-medium`, `terra-high`, and `sol-medium` → `sol-high`.
-
-`sol-high` → `sol-max`.
+dispatch the next work item. Use the single post-fix recovery profile mapped
+for the current host in the canonical execution-profile registry. Do not
+duplicate or infer that mapping here; if the registry has no mapping for a
+profile, report recovery as unavailable.
 
 Spawn exactly one recovery worker at that higher profile with the same work-item
 scope, the unresolved findings, and the current workspace. It must use
@@ -342,23 +357,20 @@ scope, the unresolved findings, and the current workspace. It must use
 delta, rerun verification, and amend the same task commit. It must not invoke
 `$code-review`, spawn a child, or perform Boards operations. After recovery,
 the parent starts exactly one more pair of flat review workers. Record planned,
-initial effective, and recovery profiles.
-On Codex, `sol-max` resolves to `gpt-5.6-sol` / `max`; on Claude Code, it
-resolves to `claude-opus-5` / `max`. A host that cannot resolve it must report
-`review_escalation_unavailable`; it must not substitute `sol-xhigh` or another
-profile. Do not auto-select an `xhigh` profile, retry a second recovery worker,
-close the item, or dispatch later work while recovery is unresolved. If no mapped
-recovery profile is available, the recovery worker fails, or its final flat
-review still has a blocking finding, return `review_escalation_required` with
-the concrete findings and stop for human replanning.
+initial effective, and recovery profiles. A host that cannot resolve its mapped
+profile must report `review_escalation_unavailable`; it must not substitute
+another profile. Do not auto-select an `xhigh` profile. Do not retry a second
+recovery worker, close the item, or dispatch later work while recovery is
+unresolved. If no mapped recovery profile is available, the
+recovery worker fails, or its final flat review still has a blocking finding,
+return `review_escalation_required` with the concrete findings and stop for
+human replanning.
 
-### 4. Closeout — spawn cheap agent
+### 4. Closeout — spawn helper agent
 
-On Codex, prefer the currently available Luna model with
-`reasoning_effort=low`; if Luna is unavailable, use the currently available
-lightweight model, such as Terra with low reasoning. Do not treat a specific
-model ID as a universal requirement. On Claude Code, use
-`agent(prompt, {model: 'haiku', effort: 'low'})`.
+Use the shared host-specific helper-agent profile above. On Claude Code, use
+`agent(prompt, {model: 'haiku', effort: 'low'})`; on Cursor, use
+`composer2.5` without an effort field.
 
 Closeout policy (apply before spawning):
 - The parent (or a standalone closeout agent) must map every Acceptance
@@ -416,7 +428,7 @@ review/repair stage, and closeout complete successfully.
 
 Return one ordered summary. For every completed work item, include the planned
 and effective execution profile IDs, any pre-start capacity fallback error
-(Codex only), `reviewBase`, worker-reported commit and verification, both
+(Codex/ChatGPT only), `reviewBase`, worker-reported commit and verification, both
 review-round axis reports, any repair/recovery profile, final tracker state,
 and closeout result. For a stopped run, identify the work item and stage that
 stopped the sequence, retain earlier completed results, and state that later

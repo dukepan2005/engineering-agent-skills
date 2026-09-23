@@ -156,14 +156,22 @@ class SkillDependencyContractTests(unittest.TestCase):
         text = self.read_skill("azure-devops-boards-skill")
 
         self.assertIn("semantic `task-boards-ops` role", text)
-        self.assertIn("prefer the currently available Luna", text)
-        self.assertIn("if Luna is unavailable", text)
-        self.assertIn("lightweight model, such as Terra with low reasoning", text)
+        self.assertIn("prefer GPT-6 Luna", text)
+        self.assertIn("if it is unavailable, use GPT-6 Sol", text)
+        self.assertIn("`reasoning_effort=high`", text)
+        self.assertIn("`reasoning_effort=medium`", text)
         self.assertIn("On Cursor", text)
-        self.assertIn("lightweight Composer model", text)
-        self.assertRegex(text, r"Do not require a\s+specific Composer model ID")
+        self.assertIn("use `composer2.5`", text)
+        self.assertIn("reasoning-effort setting", text)
         self.assertNotRegex(text, r"`model=[^`]+`")
-        self.assertIn("`reasoning_effort=low`", text)
+
+    def test_readme_boards_role_uses_current_helper_profiles(self) -> None:
+        text = (REPO_ROOT / "README.md").read_text()
+
+        self.assertIn("GPT-6 Luna high", text)
+        self.assertIn("GPT-6 Sol medium", text)
+        self.assertIn("Composer 2.5", text)
+        self.assertIn("effort unset", text)
 
     def test_orchestrator_spawns_claude_code_children_through_workflow(self) -> None:
         text = self.read_skill("azure-task-orchestrator")
@@ -174,7 +182,7 @@ class SkillDependencyContractTests(unittest.TestCase):
         )
         self.assertIn("agent(prompt, {model: 'haiku', effort: 'low'})", text)
         self.assertRegex(text, r"agent\(prompt, \{model, effort, label\}\)")
-        self.assertIn("Claude Code has no pre-start capacity", text)
+        self.assertRegex(text, r"Claude Code has no pre-start\s+capacity error signal")
 
         # The planning loop still stays in the conversation; only the
         # post-confirmation flat delivery loop runs inside one Workflow.
@@ -204,39 +212,59 @@ class SkillDependencyContractTests(unittest.TestCase):
             / "execution-profiles.md"
         ).read_text()
 
-        self.assertIn("## Codex", text)
+        self.assertIn("## Codex / ChatGPT", text)
         self.assertIn("## Claude Code", text)
         self.assertIn("## Cursor", text)
-        self.assertIn("| `luna-max` | `gpt-5.6-luna` | `max` | — |", text)
-        self.assertIn("`luna-max` is Codex-only", text)
-        self.assertIn("| `sol-max` | `gpt-5.6-sol` | `max` | `sol-high` |", text)
-        self.assertIn("| `terra-medium` | `sonnet` | `medium` |", text)
-        self.assertIn("| `sol-high` | `claude-opus-5` | `high` |", text)
-        self.assertIn("| `sol-max` | `claude-opus-5` | `max` |", text)
-        self.assertIn("| `sol-xhigh` | `claude-opus-5` | `xhigh` |", text)
-        self.assertIn("Cursor resolves the regular profiles to `grok4.5 high`", text)
-        self.assertIn("`claude-opus-5 high` and `claude-opus-5 xhigh`", text)
-        self.assertRegex(text, r"does not preserve the\s+profile's separate reasoning-effort semantics")
-        self.assertIn("| `terra-medium` | `grok4.5 high` |", text)
-        self.assertIn("| `terra-high` | `grok4.5 high` |", text)
-        self.assertIn("| `sol-medium` | `grok4.5 high` |", text)
-        self.assertIn("| `sol-high` | `claude-opus-5 high` |", text)
-        self.assertIn("| `sol-xhigh` | `claude-opus-5 xhigh` |", text)
+        self.assertIn("| `luna-high` | `gpt-6-luna` | `high` | — |", text)
+        self.assertIn("| `luna-xhigh` | `gpt-6-luna` | `xhigh` | `luna-high` |", text)
+        self.assertIn("| `luna-max` | `gpt-6-luna` | `max` | — |", text)
+        self.assertIn("| `sol-medium` | `gpt-6-sol` | `medium` | — |", text)
+        self.assertIn("| `sol-xhigh` | `gpt-6-sol` | `xhigh` | `sol-high` |", text)
+        claude = text.split("## Claude Code", 1)[1].split("## Cursor", 1)[0]
+        self.assertIn("| `sonnet-medium` | `sonnet` | `medium` |", claude)
+        self.assertIn("| `sonnet-high` | `sonnet` | `high` |", claude)
+        self.assertIn("| `sonnet-xhigh` | `sonnet` | `xhigh` |", claude)
+        self.assertIn("| `opus-medium` | `opus` | `medium` |", claude)
+        self.assertIn("| `opus-high` | `opus` | `high` |", claude)
+        self.assertIn("| `opus-max` | `opus` | `max` |", claude)
+        self.assertIn("| `opus-xhigh` | `opus` | `xhigh` |", claude)
+        self.assertIn("Use `opus-max` only for the single post-fix recovery", claude)
+        self.assertNotRegex(claude, r"`(?:luna|sol)-")
+
+        cursor = text.split("## Cursor", 1)[1].split("## Planning", 1)[0]
+        self.assertIn("| `composer2.5` | `composer2.5` | — |", cursor)
+        self.assertEqual(
+            [
+                ("composer2.5", "composer2.5", "—"),
+                ("grok4.6-high", "grok4.6", "`high`"),
+                ("grok4.6-xhigh", "grok4.6", "`xhigh`"),
+                ("grok4.7-high", "grok4.7", "`high`"),
+                ("grok4.7-xhigh", "grok4.7", "`xhigh`"),
+            ],
+            re.findall(
+                r"^\| `([^`]+)` \| `([^`]+)` \| (`[^`]+`|—) \|$",
+                cursor,
+                re.MULTILINE,
+            ),
+        )
+        self.assertNotIn("opus", cursor.lower())
         self.assertIn("no pre-start capacity error signal", text)
 
     def test_confirm_plan_and_report_distinguish_fallback_by_host(self) -> None:
         text = self.read_skill("azure-task-orchestrator")
 
-        # Confirm the Validated Plan section must clarify that Claude Code
-        # omits the fallback column since it has no pre-start capacity signal.
+        # Confirm fallback profiles are limited to Codex/ChatGPT.
         self.assertIn(
-            "On Codex, also include\nthe pre-start capacity fallback profile if any; Claude Code has no such\nfallback, so omit that column there.",
+            "On Codex/ChatGPT, also include the\n"
+            "pre-start capacity fallback profile if any; Claude Code and Cursor have no\n"
+            "such fallback, so omit that column there.",
             text,
         )
+        self.assertIn("(Codex/ChatGPT only)", text)
 
         # Report section must also clarify fallback is Codex-only.
         self.assertIn(
-            "any pre-start capacity fallback error\n(Codex only)",
+            "any pre-start capacity fallback error\n(Codex/ChatGPT only)",
             text,
         )
 
@@ -256,10 +284,13 @@ class SkillDependencyContractTests(unittest.TestCase):
 
         # Verify PROFILES registry matches execution-profiles.md
         self.assertIn("const PROFILES = {", script_text)
-        self.assertIn("'terra-medium': { model: 'sonnet', effort: 'medium' }", script_text)
-        self.assertIn("'sol-high': { model: 'claude-opus-5', effort: 'high' }", script_text)
-        self.assertIn("'sol-max': { model: 'claude-opus-5', effort: 'max' }", script_text)
-        self.assertIn("'sol-xhigh': { model: 'claude-opus-5', effort: 'xhigh' }", script_text)
+        self.assertIn("'sonnet-medium': { model: 'sonnet', effort: 'medium' }", script_text)
+        self.assertIn("'sonnet-high': { model: 'sonnet', effort: 'high' }", script_text)
+        self.assertIn("'sonnet-xhigh': { model: 'sonnet', effort: 'xhigh' }", script_text)
+        self.assertIn("'opus-medium': { model: 'opus', effort: 'medium' }", script_text)
+        self.assertIn("'opus-high': { model: 'opus', effort: 'high' }", script_text)
+        self.assertIn("'opus-max': { model: 'opus', effort: 'max' }", script_text)
+        self.assertIn("'opus-xhigh': { model: 'opus', effort: 'xhigh' }", script_text)
 
         # Verify core agent() calls for the flat stages.
         self.assertIn("agent(", script_text)
@@ -311,17 +342,31 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("Review Escalation", skill)
         self.assertIn("review_escalation_required", skill)
         self.assertRegex(skill, r"do not run\s+closeout or\s+dispatch the next work item")
-        self.assertIn("Do not auto-select an `xhigh` profile", skill)
         self.assertIn("REVIEW_ESCALATION", script)
         self.assertIn("review_escalation_required", script)
         self.assertIn("review_escalation_failed", script)
         self.assertIn("review_escalation_unavailable", script)
-        self.assertIn("`luna-max`, `terra-medium`, `terra-high`, and `sol-medium` → `sol-high`.", skill)
-        self.assertIn("`sol-high` → `sol-max`.", skill)
-        self.assertIn("'terra-medium': 'sol-high'", script)
-        self.assertIn("'terra-high': 'sol-high'", script)
-        self.assertIn("'sol-medium': 'sol-high'", script)
-        self.assertIn("'sol-high': 'sol-max'", script)
+        self.assertIn("canonical execution-profile registry", skill)
+        self.assertIn("Do not auto-select an `xhigh` profile", skill)
+        self.assertNotIn("`luna-high`, `sol-medium` →", skill)
+        registry = (
+            REPO_ROOT
+            / "skills"
+            / "task-model-planner"
+            / "references"
+            / "execution-profiles.md"
+        ).read_text()
+        self.assertIn(
+            "`sonnet-medium`, `sonnet-high`, `opus-medium` → `opus-high`;",
+            registry,
+        )
+        self.assertRegex(registry, r"`opus-high` →\s+`opus-max`\.")
+        self.assertIn("'sonnet-medium': 'opus-high'", script)
+        self.assertIn("'sonnet-high': 'opus-high'", script)
+        recovery_map = script.split("const REVIEW_ESCALATION = {", 1)[1].split("}", 1)[0]
+        self.assertNotRegex(recovery_map, r"xhigh")
+        self.assertIn("'opus-medium': 'opus-high'", script)
+        self.assertIn("'opus-high': 'opus-max'", script)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,10 @@
 
 Date: 2026-07-18
 
+> Historical calibration only. Model availability and profile IDs in this
+> report reflect the research date; the current runtime options are defined in
+> [the execution-profile registry](../skills/task-model-planner/references/execution-profiles.md).
+
 ## Question
 
 Should any cross-module, cross-boundary, or cross-repository Task automatically
@@ -64,11 +68,10 @@ be converted into a stronger execution profile.
 
 ### Official OpenAI guidance
 
-OpenAI describes GPT-5.6 Sol as the flagship for “complex reasoning and coding”
-and Terra as the option that balances intelligence and cost. It does not define
-cross-module or cross-repository work as an automatic Sol condition. Both
-models support the same documented reasoning-effort range, so model family and
-effort are technically separate choices. [OpenAI model
+OpenAI describes GPT-5.6 Sol as the flagship for “complex reasoning and coding”.
+Its guidance does not define cross-module or cross-repository work as an
+automatic Sol condition, and treats model family and effort as separate
+choices. [OpenAI model
 selection](https://developers.openai.com/api/docs/models)
 
 OpenAI's GPT-5 developer guidance says higher effort tends toward quality and
@@ -97,9 +100,9 @@ adjusting effort to task complexity. It does not use module or repository count
 as the classifier. [Anthropic effort
 documentation](https://platform.claude.com/docs/en/build-with-claude/effort)
 
-This is not evidence about the exact performance curve of GPT-5.6 Sol or Terra.
-It is relevant engineering evidence that an effort tier represents depth,
-duration, and token/tool budget rather than codebase topology.
+This is not evidence about the exact performance curve of GPT-5.6 Sol. It is
+relevant engineering evidence that an effort tier represents depth, duration,
+and token/tool budget rather than codebase topology.
 
 Anthropic also documented a real Claude Code calibration failure: changing the
 default from `high` to `medium` reduced latency but users perceived lower
@@ -150,19 +153,19 @@ Use two independent gates. Do not add points for repository or module count.
 Counts identify where to inspect; evidence about decisions and verification
 determines the profile.
 
-Use four regular profiles for agent-ready Tasks: `terra-medium`, `terra-high`,
-`sol-medium`, and `sol-high`. Make `terra-high` and `sol-medium` the two primary
-profiles. `terra-high` fits implementation whose decisions are settled but
-whose mechanics retain a material hazard; `sol-medium` fits bounded work whose
-hard part is residual judgment rather than a long implementation path. They are
-the two central rungs in the scenario-specific regular escalation order:
-`terra-medium` → `terra-high` → `sol-medium` → `sol-high`. Reserve
-`terra-medium` for genuinely straightforward execution, `sol-high` for the
+Use medium and high effort for both a general execution family and Sol. Make
+the execution family at high effort and Sol at medium effort the two primary
+combinations. The former fits implementation whose decisions are settled but
+whose mechanics retain a material hazard; the latter fits work whose hard part
+is residual judgment rather than a long implementation path. The typical order
+is the execution family at medium, the execution family at high, Sol at medium,
+then Sol at high.
+Reserve medium effort for genuinely straightforward execution, Sol-high for the
 compounded case, and every `xhigh` profile for exceptions outside that ladder.
 
-### Gate A: choose Terra or Sol
+### Gate A: choose an execution model or Sol
 
-Choose **Terra** when all of the following are true:
+Choose the execution model when all of the following are true:
 
 - the specification and Tasks contain the decisions expected from the upstream
   grilling and decomposition workflow;
@@ -237,9 +240,9 @@ be exceptional.
 
 | Task shape | Recommended starting profile | Reason |
 |---|---|---|
-| Update a generated protocol in two repositories; contract and regeneration commands are authoritative; both consumers compile and test | `terra-medium` or `terra-high` | Cross-repository, but semantic choices are already made and verification is strong |
-| Rename an API and update three known call sites with focused tests | `terra-medium` | Multiple modules do not create a reasoning hazard |
-| Implement a clear compatibility shim across producer and consumer with a specified rollout order | `terra-high` | Coordinated boundary work with a known design |
+| Update a generated protocol in two repositories; contract and regeneration commands are authoritative; both consumers compile and test | Execution medium or high | Cross-repository, but semantic choices are already made and verification is strong |
+| Rename an API and update three known call sites with focused tests | Execution medium | Multiple modules do not create a reasoning hazard |
+| Implement a clear compatibility shim across producer and consumer with a specified rollout order | Execution high | Coordinated boundary work with a known design |
 | Ticket lacks the linked specification or omits the acceptance criteria expected from the upstream workflow | No profile; incomplete input | Missing planning authority is not an execution-model problem |
 | Decide ambiguous ownership between two runtimes where shutdown ordering and cleanup can race | `sol-high` | The hard part is judgment over lifecycle semantics and concurrency |
 | Design and execute an irreversible data cutover across independently deployed systems with incomplete compatibility authority and weak rollback proof | `sol-xhigh` | Long horizon plus unresolved semantics, high failure cost, and weak verification |
