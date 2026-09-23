@@ -1,13 +1,15 @@
 # Execution Profile Registry
 
-This registry is the canonical mapping from a planner output to the exact child
-agent configuration. Use only these IDs. Do not override a mapped value in a
-planner report or orchestrator dispatch.
+This registry is the canonical mapping for built-in execution-profile IDs to
+exact child-agent configurations. Do not override a mapped value in a planner
+report or orchestrator dispatch. The orchestrator may also pass validated,
+invocation-local candidate IDs; these are not registry entries and must not be
+persisted here.
 
-Resolve the model or host configuration per host. The profile ID is the only
-value the planner and orchestrator exchange; each host resolves it into its
-own model/effort pair or combined model configuration only when spawning the
-child agent.
+The planner and orchestrator exchange a candidate ID. Resolve built-in profile
+IDs from this registry and any `additional-*` IDs only from the validated
+invocation-local map. Each host resolves its own model/effort pair or combined
+model configuration only when spawning the child agent.
 
 ## Codex / ChatGPT
 
@@ -57,17 +59,17 @@ select it for regular planning.
 
 `model` and `effort` here are exactly the `opts.model` and `opts.effort`
 fields of a `Workflow` script's `agent()` call. The bare `Agent` tool cannot
-set `effort` explicitly, so every profiled child on Claude Code must be
-spawned through a `Workflow` script's `agent()` call, not through the `Agent`
-tool directly.
+set `effort` explicitly, so every implementation or repair child on Claude
+Code must be spawned through a `Workflow` script's `agent()` call, not through
+the `Agent` tool directly.
 
 ## Cursor
 
 Cursor supports Composer 2.5 without a reasoning-effort setting, plus Grok 4.6
-and Grok 4.7 at `high` or `xhigh`. Leave effort unset for Composer 2.5. Use the
-model selected in the current host configuration; do not infer a capability
-ranking or automatic fallback between Grok versions. Use the exact model and
-effort from the selected profile.
+and Grok 4.7 at `high` or `xhigh`. Leave effort unset for Composer 2.5. For a
+built-in profile, use the exact model and effort in the table. A parent may
+also supply a separately validated run-scoped candidate for the active host.
+Do not infer a capability ranking or automatic fallback between Grok versions.
 
 | Profile ID | Cursor model | Reasoning effort |
 |---|---|---|
@@ -83,9 +85,9 @@ For Codex/ChatGPT, use `luna-high`, `sol-medium`, or `sol-high` according to
 the model-family and effort guidance in `../SKILL.md`. For Claude Code, use a
 Sonnet profile when material decisions are resolved and an Opus profile when
 residual judgment or deeper implementation reasoning remains. For Cursor,
-choose the host-configured Grok version and a supported effort. Treat `xhigh`
-profiles as exceptions and apply the gates in `../SKILL.md` before selecting
-one.
+choose a host-configured built-in profile or a parent-supplied candidate
+validated for this invocation. Treat `xhigh` profiles as exceptions and apply
+the gates in `../SKILL.md` before selecting one.
 
 Select `luna-max` only on Codex/ChatGPT and only when the separate Luna gates
 in `../SKILL.md` are all met.

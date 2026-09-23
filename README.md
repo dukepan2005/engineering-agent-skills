@@ -12,7 +12,7 @@ Codex, Claude Code, and Cursor.
 | [`azure-devops-boards-skill`](skills/azure-devops-boards-skill/) | Safely read and mutate Azure DevOps Boards work items through the locally authenticated Azure CLI. |
 | [`azure-task-implement`](skills/azure-task-implement/) | Implement code from a provided specification or ticket scope. |
 | `task-boards-ops` | Semantic role for a Boards-only helper: Codex/ChatGPT use GPT-6 Luna high, falling back to GPT-6 Sol medium; Claude Code uses Haiku low; Cursor uses Composer 2.5 with effort unset. Claude Code may optionally provide the [named agent](.claude/agents/task-boards-ops.md). |
-| [`task-model-planner`](skills/task-model-planner/) | Recommend one named, lowest-reliable execution profile from a parent-provided work-item snapshot and linked specification authority. |
+| [`task-model-planner`](skills/task-model-planner/) | Recommend one source-backed, lowest-cost reliable execution candidate from a parent-provided work-item snapshot and linked specification authority. |
 | [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver implementation-ready Azure Boards work items from a Story or an explicit item set with parent-owned flat implementation, two-axis review, repair, and closeout workers. |
 | [`explaining-code-changes`](skills/explaining-code-changes/) | Explain a commit or commit range (single SHA, `a..b`, or any git-diff-style revision argument) — what changed, what each piece does, and why — for ordinary/junior developers. |
 
@@ -85,7 +85,7 @@ Boards work items. It accepts either a Story, whose direct New Task and Bug chil
 it plans and delivers in dependency order, or an explicit item set, including a
 single Task or Bug. It delegates Azure Boards mechanical operations (preflight,
 closeout) to a cheap child in the semantic `task-boards-ops` role and code
-implementation to a planner-specified agent:
+implementation to a candidate-selected agent:
 
 ```text
 $azure-task-orchestrator AB#168
@@ -93,7 +93,7 @@ $azure-task-orchestrator AB#168
 
 It first reads one planning snapshot through a direct `task-boards-ops` child,
 then combines that Boards snapshot with any linked specification documents from
-the accepted planning authority before invoking the read-only planner. For each
+the accepted planning authority to prepare the execution-candidate plan. For each
 work item the parent controls a flat sequence:
 1. **Preflight** (cheap model, low reasoning) — reads the current Azure Boards
    item and returns a structured scope snapshot.
@@ -137,9 +137,10 @@ documents when the work-item references require them:
 $task-model-planner <parent-provided-snapshot>
 ```
 
-It returns one cost-aware execution-profile ID per work item, plus evidence,
-confidence, and escalation triggers. The planner's bundled registry is the
-single mapping from profile ID to model and reasoning effort.
+It returns one cost-aware execution-candidate ID per work item, plus evidence,
+confidence, and escalation triggers. Built-in IDs resolve through the
+planner's bundled registry; caller-supplied candidates are validated for the
+current host and remain scoped to that invocation.
 
 ### Recommended delivery flow
 
@@ -150,8 +151,14 @@ snapshot before invoking the planner:
 $azure-task-orchestrator <Story-or-explicit-work-item-set>
 ```
 
-The orchestrator resolves each profile ID through `$task-model-planner`'s
-canonical registry, then runs the flat parent-controlled sequence per work item:
+Users may naturally ask the orchestrator to consider an extra model and
+reasoning strength for the current host, for example: “Also consider another
+model this platform can dispatch at high reasoning effort; verify it first and
+let the plan decide whether it fits.” No structured parameter block is
+required. Without that request, only built-in profiles are considered. The
+orchestrator resolves each built-in profile ID through `$task-model-planner`'s
+canonical registry and each additional candidate ID through the validated
+invocation input, then runs the flat parent-controlled sequence per work item:
 preflight, implementation, two-axis review, repair/review, and closeout. It
 validates and displays the planner's ordered report, waits for explicit user
 confirmation before dispatching, and stops the sequence on the first

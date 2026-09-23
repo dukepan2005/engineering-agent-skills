@@ -54,12 +54,18 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("planning-snapshot --organization <organization> --project <project> --id <id>\n--id <id>", text)
         self.assertIn("direct New Task and Bug children", text)
         self.assertRegex(text, re.compile(r"Do not read a\s+non-New child"))
-        self.assertRegex(text, re.compile(r"Give `\$task-model-planner` the validated composite snapshot file"))
+        self.assertRegex(
+            text,
+            re.compile(
+                r"In the parent agent's current context, invoke `\$task-model-planner` with the\s+"
+                r"validated composite snapshot file"
+            ),
+        )
         self.assertIn("linked specification documents", text)
         self.assertIn("`linkedSpecifications` collection", text)
         self.assertIn("`{reference, material, content}` decision", text)
         self.assertIn("Accept both Task and Bug targets", text)
-        self.assertIn("planner is\n   read-only planning logic; it must not read Azure Boards", text)
+        self.assertIn("planner's report as guidance, not tracker authority", text)
 
     def test_orchestrator_uses_verified_file_handoff_for_large_snapshots(self) -> None:
         text = self.read_skill("azure-task-orchestrator")
@@ -105,6 +111,32 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("compare effort levels", text)
         self.assertIn("performance benefit is unverified", text)
         self.assertIn("## Model and evaluation evidence", text)
+
+    def test_orchestrator_accepts_optional_current_host_candidates(self) -> None:
+        text = self.read_skill("azure-task-orchestrator")
+
+        self.assertIn("Users may naturally ask to consider another model", text)
+        self.assertIn("No structured parameter block is required", text)
+        self.assertIn("If the user does not ask for extra choices, use the built-in profiles only", text)
+        self.assertIn("Represent any requested choices internally as an optional\n`additional_candidates` list", text)
+        self.assertIn("Candidates apply to the current host, so do not\nask the user to specify a host", text)
+        self.assertIn("never modify the canonical\nprofile registry", text)
+        self.assertIn("Assign each remaining accepted candidate a stable, invocation-local ID such\n   as `additional-1`", text)
+        self.assertIn("additional candidate has no fallback", text)
+        self.assertIn("additional-*` candidate IDs", text)
+        self.assertIn("`plannedCandidate`", text)
+        self.assertIn("`additionalCandidates`", text)
+
+    def test_planner_only_selects_parent_validated_dynamic_candidates(self) -> None:
+        text = self.read_skill("task-model-planner")
+
+        self.assertIn("parent may optionally provide an\n`additional_candidates` list", text)
+        self.assertRegex(text, r"parent[-\s]+assigned invocation-local `candidate_id`")
+        self.assertIn("parent must verify that the\npair is spawnable on the current host", text)
+        self.assertIn("only from the candidate pool for the active host", text)
+        self.assertIn("Output only the\nselected candidate ID", text)
+        self.assertIn("Execution candidate ID", text)
+        self.assertIn("profile-id or additional-id", text)
 
     def test_implementation_preserves_standalone_and_parent_review_modes(self) -> None:
         text = self.read_skill("azure-task-implement")
@@ -187,6 +219,14 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("Composer 2.5", text)
         self.assertIn("effort unset", text)
 
+    def test_readme_documents_optional_run_scoped_candidates(self) -> None:
+        text = (REPO_ROOT / "README.md").read_text()
+
+        self.assertIn("caller-supplied candidates", text)
+        self.assertIn("Users may naturally ask the orchestrator", text)
+        self.assertIn("No structured parameter block is\nrequired", text)
+        self.assertIn("remain scoped to that invocation", text)
+
     def test_orchestrator_spawns_claude_code_children_through_workflow(self) -> None:
         text = self.read_skill("azure-task-orchestrator")
 
@@ -267,19 +307,19 @@ class SkillDependencyContractTests(unittest.TestCase):
     def test_confirm_plan_and_report_distinguish_fallback_by_host(self) -> None:
         text = self.read_skill("azure-task-orchestrator")
 
-        # Confirm fallback profiles are limited to Codex/ChatGPT.
+        # Confirm fallback data is shown for built-in profiles, not invented
+        # for additional candidates.
         self.assertIn(
-            "On Codex/ChatGPT, also include the\n"
-            "pre-start capacity fallback profile if any; Claude Code and Cursor have no\n"
-            "such fallback, so omit that column there.",
+            "pre-start capacity fallback profile if one exists; for an additional candidate,\n"
+            "show that no fallback is defined.",
             text,
         )
         self.assertIn("(Codex/ChatGPT only)", text)
 
         # Report section must also clarify fallback is Codex-only.
-        self.assertIn(
-            "any pre-start capacity fallback error\n(Codex/ChatGPT only)",
+        self.assertRegex(
             text,
+            r"any\s+pre-start capacity fallback error \(Codex/ChatGPT only\)",
         )
 
     def test_claude_code_delivery_loop_script_exists_and_is_valid(self) -> None:
@@ -315,6 +355,14 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("reviewBase", script_text)
         self.assertIn("reviewOwner=parent", script_text)
         self.assertIn("closeout", script_text.lower())
+        self.assertIn("additionalCandidates", script_text)
+        self.assertIn("plannedCandidate", script_text)
+        self.assertIn("resolveCandidate(candidateId)", script_text)
+        self.assertIn("agentOptions(candidate, label)", script_text)
+        self.assertIn("plannedMapping: describeCandidate", script_text)
+        self.assertIn("plannerEvidence and orderReason are required", script_text)
+        self.assertIn("Exact model/effort mapping:", script_text)
+        self.assertNotIn("plannedProfile", script_text)
 
         # Verify script returns a report structure
         self.assertIn("return report", script_text)

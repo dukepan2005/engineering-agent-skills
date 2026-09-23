@@ -10,15 +10,21 @@
 //     "id": "AB#123",
 //     "type": "Task",
 //     "title": "...",
-//     "plannedProfile": "opus-medium",
+//     "plannedCandidate": "opus-medium",
+//     "plannerEvidence": "...",
 //     "orderReason": "..."
 //   }],
+//   "additionalCandidates": {
+//     "additional-1": {
+//       "model": "<current-host model identifier>",
+//       "reasoning_effort": "<supported effort or unset>"
+//     }
+//   },
 //   "trackerConnection": {
 //     "organization": "https://dev.azure.com/example",
 //     "project": "ExampleProject",
 //     "team": "Example Team"
-//   },
-//   "plannerReport": { "full planner report object": true }
+//   }
 // }
 
 export const meta = {
@@ -53,10 +59,37 @@ const REVIEW_ESCALATION = {
   'opus-high': 'opus-max',
 }
 
-function resolveProfile(profileId) {
-  const profile = PROFILES[profileId]
-  if (!profile) throw new Error(`Unknown profile ID: ${profileId}`)
-  return profile
+function resolveCandidate(candidateId) {
+  const profile = PROFILES[candidateId]
+  if (profile) return profile
+
+  const candidate = args.additionalCandidates?.[candidateId]
+  if (!candidate || typeof candidate.model !== 'string' || !candidate.model.trim()) {
+    throw new Error(`Unknown execution candidate ID: ${candidateId}`)
+  }
+  if (candidate.reasoning_effort !== 'unset'
+    && (typeof candidate.reasoning_effort !== 'string' || !candidate.reasoning_effort.trim())) {
+    throw new Error(`Candidate ${candidateId} must specify reasoning_effort or unset`)
+  }
+  return {
+    model: candidate.model,
+    effort: candidate.reasoning_effort === 'unset' ? undefined : candidate.reasoning_effort,
+  }
+}
+
+function agentOptions(candidate, label) {
+  return candidate.effort === undefined
+    ? { model: candidate.model, label }
+    : { model: candidate.model, effort: candidate.effort, label }
+}
+
+function describeCandidate(candidateId) {
+  const candidate = resolveCandidate(candidateId)
+  return {
+    candidateId,
+    model: candidate.model,
+    reasoning_effort: candidate.effort ?? 'unset',
+  }
 }
 
 function parseJson(value, label) {
@@ -172,9 +205,10 @@ ${shared}`
   ]
 }
 
-async function runRepair({ item, implementation, preflightData, reports, profileId, label }) {
+async function runRepair({ item, implementation, preflightData, reports, candidateId, label }) {
   phase(label)
-  const profile = resolveProfile(profileId)
+  const candidate = resolveCandidate(candidateId)
+  const candidateMapping = describeCandidate(candidateId)
   const findings = reports.flatMap((report) => report.findings.map((finding) => ({
     ...finding,
     axis: report.axis,
@@ -187,6 +221,9 @@ relevant verification, and amend the same task commit. Do not invoke
 \`$code-review\`, spawn any child, create a second task commit, or perform
 Azure Boards operations. Return JSON only using the implementation Skill's
 ready_for_review or implementation_failed contract.
+
+Effective candidate: ${candidateId}
+Exact model/effort mapping: ${JSON.stringify(candidateMapping)}
 
 Original implementation:
 \`\`\`json
@@ -202,7 +239,7 @@ Review findings:
 \`\`\`json
 ${JSON.stringify(findings, null, 2)}
 \`\`\``,
-    { model: profile.model, effort: profile.effort, label: `${label}_${item.id}` }
+    agentOptions(candidate, `${label}_${item.id}`)
   )
   return parseImplementation(result, `${label} ${item.id}`)
 }
@@ -211,6 +248,15 @@ ${JSON.stringify(findings, null, 2)}
 const results = []
 const plan = args.validatedPlan || []
 const trackerConnection = args.trackerConnection
+
+if (!Array.isArray(plan)) throw new Error('validatedPlan must be an array')
+for (const item of plan) {
+  if (!item?.plannedCandidate) throw new Error(`plannedCandidate is required for ${item?.id || 'a work item'}`)
+  if (!item?.plannerEvidence || !item?.orderReason) {
+    throw new Error(`plannerEvidence and orderReason are required for ${item.id || 'a work item'}`)
+  }
+  resolveCandidate(item.plannedCandidate)
+}
 
 if (!trackerConnection?.organization || !trackerConnection?.project) {
   throw new Error('trackerConnection.organization and trackerConnection.project are required')
@@ -223,8 +269,8 @@ for (let i = 0; i < plan.length; i++) {
   const item = plan[i]
   const itemId = item.id
   const itemType = item.type || 'Task'
-  const plannedProfile = item.plannedProfile
-  let effectiveProfile = plannedProfile
+  const plannedCandidate = item.plannedCandidate
+  let effectiveCandidate = plannedCandidate
   let implementation = null
   let reviewRounds = []
 
@@ -241,15 +287,22 @@ for (let i = 0; i < plan.length; i++) {
 
     // === STEP 2: Implement ===
     phase('Implement')
-    const profile = resolveProfile(effectiveProfile)
+    const candidate = resolveCandidate(effectiveCandidate)
+    const candidateMapping = describeCandidate(effectiveCandidate)
     const implementationResult = await agent(
-      `Use \`$azure-task-implement\` with \`reviewOwner=parent\` to implement work item ${itemId} in the current workspace and branch. The effective profile is fixed. Do not invoke \`$code-review\`, spawn any child, or perform Azure Boards operations. Return JSON only using the implementation Skill's ready_for_review or implementation_failed contract.
+      `Use \`$azure-task-implement\` with \`reviewOwner=parent\` to implement work item ${itemId} in the current workspace and branch. The effective model/effort candidate is fixed. Do not invoke \`$code-review\`, spawn any child, or perform Azure Boards operations. Return JSON only using the implementation Skill's ready_for_review or implementation_failed contract.
+
+Planned candidate: ${plannedCandidate}
+Effective candidate: ${effectiveCandidate}
+Exact model/effort mapping: ${JSON.stringify(candidateMapping)}
+Order reason: ${item.orderReason}
+Planner evidence: ${item.plannerEvidence}
 
 Preflight scope:
 \`\`\`json
 ${JSON.stringify(preflightData, null, 2)}
 \`\`\``,
-      { model: profile.model, effort: profile.effort, label: `delivery_${plannedProfile}_${itemId}` }
+      agentOptions(candidate, `delivery_${plannedCandidate}_${itemId}`)
     )
     implementation = parseImplementation(implementationResult, `implementation ${itemId}`)
     if (implementation.outcome === 'implementation_failed') {
@@ -267,7 +320,7 @@ ${JSON.stringify(preflightData, null, 2)}
         implementation,
         preflightData,
         reports: firstReview,
-        profileId: effectiveProfile,
+        candidateId: effectiveCandidate,
         label: 'Repair',
       })
       if (implementation.outcome === 'implementation_failed') {
@@ -283,9 +336,9 @@ ${JSON.stringify(preflightData, null, 2)}
     // === STEP 5: One stronger recovery, then one final flat review ===
     let recoveryProfile = null
     if (unresolvedBlocking.length > 0) {
-      recoveryProfile = REVIEW_ESCALATION[effectiveProfile]
+      recoveryProfile = REVIEW_ESCALATION[effectiveCandidate]
       if (!recoveryProfile || !PROFILES[recoveryProfile]) {
-        results.push({ id: itemId, type: itemType, plannedProfile, effectiveProfile, status: 'review_escalation_unavailable', blockingFindings: unresolvedBlocking })
+        results.push({ id: itemId, type: itemType, plannedCandidate, effectiveCandidate, status: 'review_escalation_unavailable', blockingFindings: unresolvedBlocking })
         stoppedAt = itemId
         break
       }
@@ -294,20 +347,20 @@ ${JSON.stringify(preflightData, null, 2)}
         implementation,
         preflightData,
         reports: secondReview,
-        profileId: recoveryProfile,
+        candidateId: recoveryProfile,
         label: `Review recovery ${recoveryProfile}`,
       })
       if (implementation.outcome === 'implementation_failed') {
-        results.push({ id: itemId, type: itemType, plannedProfile, effectiveProfile, recoveryProfile, status: 'review_escalation_failed', error: compact(implementation.blocker || implementation.remainingWork || implementation) })
+        results.push({ id: itemId, type: itemType, plannedCandidate, effectiveCandidate, recoveryProfile, status: 'review_escalation_failed', error: compact(implementation.blocker || implementation.remainingWork || implementation) })
         stoppedAt = itemId
         break
       }
-      effectiveProfile = recoveryProfile
+      effectiveCandidate = recoveryProfile
       const recoveryReview = await runReviewRound({ item, implementation, preflightData, round: 'recovery' })
       reviewRounds.push(recoveryReview)
       unresolvedBlocking = blockingFindings(recoveryReview)
       if (unresolvedBlocking.length > 0) {
-        results.push({ id: itemId, type: itemType, plannedProfile, effectiveProfile, recoveryProfile, status: 'review_escalation_required', blockingFindings: unresolvedBlocking, reviewRounds })
+        results.push({ id: itemId, type: itemType, plannedCandidate, effectiveCandidate, recoveryProfile, status: 'review_escalation_required', blockingFindings: unresolvedBlocking, reviewRounds })
         stoppedAt = itemId
         break
       }
@@ -330,8 +383,8 @@ ${implementationSummary}`,
     results.push({
       id: itemId,
       type: itemType,
-      plannedProfile,
-      effectiveProfile,
+      plannedCandidate,
+      effectiveCandidate,
       recoveryProfile,
       reviewBase: implementation.reviewBase,
       commit: implementation.commit,
@@ -345,8 +398,8 @@ ${implementationSummary}`,
     results.push({
       id: itemId,
       type: itemType,
-      plannedProfile,
-      effectiveProfile,
+      plannedCandidate,
+      effectiveCandidate,
       status: 'delivery_failed',
       error: error.message,
       reviewRounds,
@@ -356,12 +409,19 @@ ${implementationSummary}`,
   }
 }
 
+const reportedResults = results.map((result) => ({
+  ...result,
+  plannedMapping: describeCandidate(result.plannedCandidate),
+  effectiveMapping: describeCandidate(result.effectiveCandidate),
+  ...(result.recoveryProfile ? { recoveryMapping: describeCandidate(result.recoveryProfile) } : {}),
+}))
+
 const report = {
   totalItems: plan.length,
-  completedItems: results.filter((result) => result.status === 'completed').length,
+  completedItems: reportedResults.filter((result) => result.status === 'completed').length,
   stoppedAt,
-  results,
-  summary: `Delivered ${results.filter((result) => result.status === 'completed').length}/${plan.length} work items.${
+  results: reportedResults,
+  summary: `Delivered ${reportedResults.filter((result) => result.status === 'completed').length}/${plan.length} work items.${
     stoppedAt ? ` Stopped at ${stoppedAt}; later items were not dispatched.` : ' All items completed successfully.'
   }`,
 }

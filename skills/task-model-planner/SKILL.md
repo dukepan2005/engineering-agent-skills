@@ -1,6 +1,6 @@
 ---
 name: task-model-planner
-description: Analyze a parent-provided Azure work-item snapshot produced after the grill-with-docs, to-spec, and to-tickets skills, then recommend one source-backed execution profile for each item. Use when the user asks which model profile, reasoning effort, or cost-aware execution configuration should implement a Story's child items or an explicit work-item set, including Tasks and Bugs.
+description: Analyze a parent-provided Azure work-item snapshot produced after the grill-with-docs, to-spec, and to-tickets skills, then recommend one source-backed execution candidate for each item. Use when the user asks which model profile, reasoning effort, or cost-aware execution configuration should implement a Story's child items or an explicit work-item set, including Tasks and Bugs.
 ---
 
 # Task Model Planner
@@ -91,8 +91,10 @@ latest information available on the planning date:
    documentation and, when using a host such as Claude Code or Cursor, that
    host's current model/effort availability documentation. Confirm the model or
    alias, supported reasoning efforts, and host-specific limits. The
-   execution-profile registry remains the approved mapping for this workflow;
-   provider API options alone do not expand the host-approved choices.
+   execution-profile registry remains the source of built-in mappings for this
+   workflow; provider API options alone do not establish that a model/effort
+   pair is available through the active host's child-spawn interface. The
+   parent may supply separately validated run-scoped candidates.
 2. **Benchmark reports.** Read the latest relevant report for coding, agentic
    coding, or the work item's closest task category. Prefer results for the
    exact model version, reasoning effort, and agent/harness in use. Consult an
@@ -128,6 +130,9 @@ official docs or active host show that a registry profile is unavailable or
 resolve it to a materially different model/effort, do not invent a profile or
 silently substitute another; report the discrepancy and stop profile selection
 until the approved mapping is resolved.
+
+Apply the same documentation and benchmark checks to every parent-supplied
+candidate. An option is not recommended merely because the caller included it.
 
 Use this evidence together with the task's residual uncertainty, failure cost,
 and verification strength. Where representative project evaluations or
@@ -168,16 +173,29 @@ For each ready work item, assess only source-backed evidence:
 - Verification strength: do focused tests, types, migrations, or established
   patterns independently detect a wrong implementation?
 
-## Choose the Execution Profile
+## Choose the Execution Candidate
 
 Read [the canonical execution-profile registry](references/execution-profiles.md)
-before selecting a profile. Output only its profile ID; do not output a free-form
-model and thinking-level pair. The registry resolves that profile separately
-for Codex/ChatGPT, Claude Code, and Cursor; do not infer a host-specific model
-from the profile name.
+before selecting a candidate. The parent may optionally provide an
+`additional_candidates` list for this invocation. Each entry has a parent-
+assigned invocation-local `candidate_id` (such as `additional-1`), the exact
+model identifier, and `reasoning_effort` supported by the current host (or
+`unset` when the model has no effort setting). The parent must verify that the
+pair is spawnable on the current host before passing it to the planner. If no
+list is supplied, use only the built-in execution-profile IDs for the current
+host. Never invent candidate IDs or model/effort combinations. Output only the
+selected candidate ID, not a free-form model/effort pair; the parent resolves
+built-in IDs from the registry and additional IDs from its validated map.
+Additional candidates expand the eligible choice set; their presence does not
+require selecting them or override the source-backed risk and effort rules.
 
-Choose the model family and reasoning effort independently for each host.
-For Codex/ChatGPT, use these regular profiles:
+Choose only from the candidate pool for the active host; never transfer a
+model/effort choice across hosts. Apply the host-specific guidance below to
+evaluate candidates. For a model family not covered by that guidance, rely on
+its current official documentation and benchmark evidence without inferring a
+ranking from the family name.
+
+For the built-in Codex/ChatGPT candidates, use these regular profiles:
 
 - `luna-high`: decisions are resolved and focused verification can catch a
   wrong implementation; Codex/ChatGPT do not offer a lower Luna effort;
@@ -191,16 +209,20 @@ for agent-ready work items. Use `sol-high` when residual judgment and deep
 implementation reasoning both remain. Neither primary profile is an automatic
 fallback for the other.
 
-For Claude Code, prefer a Sonnet profile when material decisions are resolved;
-use Opus when source-backed residual judgment or a deeper implementation
-hazard remains. For Cursor, use the model selected in the host configuration:
-Composer 2.5 has no effort setting, while Grok 4.6 and 4.7 support `high` and
-`xhigh`. Do not infer a capability ranking or fallback from model names or
-version numbers. If no model is configured, ask which one to use. All profile
-IDs and supported effort settings are defined in the registry.
+For built-in Claude Code candidates, prefer a Sonnet profile when material
+decisions are resolved; use Opus when source-backed residual judgment or a
+deeper implementation hazard remains. On Cursor, built-in Composer 2.5 has no
+effort setting, while Grok 4.6 and 4.7 support `high` and `xhigh`. Consider
+additional candidates only when the parent supplied them and verified their
+availability. Do not infer a
+capability ranking or fallback from model names or version numbers. If neither
+a usable built-in profile nor a parent-supplied candidate is available, ask
+which one to use. Built-in profile IDs and mappings are defined in the
+registry.
 
-Use only profile IDs supported by the current host registry; never infer or
-create an additional model-and-effort combination.
+Use only built-in profile IDs supported by the current host registry or exact
+candidate IDs supplied by the parent; never infer or create an additional
+model-and-effort combination.
 
 ### Qualified Luna max candidate (Codex/ChatGPT only)
 
@@ -224,14 +246,14 @@ select from that host's registry without substituting a different model for it.
 
 ### Choose the Model Family
 
-For Codex/ChatGPT, choose Luna when the specification has already fixed the
+For built-in Codex/ChatGPT choices, choose Luna when the specification has already fixed the
 intended behavior, ownership, contracts, and rollout semantics, and focused
 verification makes an incorrect implementation cheap to detect. This remains
 true when mechanical or independently verifiable edits span multiple modules
 or repositories.
 
-For Claude Code, choose Sonnet when the specification resolves material
-decisions; choose Opus when source-backed residual judgment remains, such as:
+For built-in Claude Code choices, choose Sonnet when the specification resolves
+material decisions; choose Opus when source-backed residual judgment remains, such as:
 
 - the specification, work item, current code, or another current authority
   conflicts;
@@ -243,19 +265,21 @@ decisions; choose Opus when source-backed residual judgment remains, such as:
 - ownership, lifecycle, security, migration, or compatibility semantics remain
   unresolved.
 
-For Codex/ChatGPT, these residual-judgment cases are Sol triggers. On Cursor,
-follow the configured model and apply effort only where that model supports it.
+For built-in Codex/ChatGPT choices, these residual-judgment cases are Sol
+triggers. For additional candidates or on Cursor, apply effort only where the
+candidate supports it and use current source evidence to evaluate the model.
 Treat cross-boundary scope as a prompt to inspect the seam, never as a
 model-family trigger by itself.
 
 ### Choose Reasoning Effort
 
-On Codex/ChatGPT, use `medium` only with Sol. Select `sol-medium` when residual
-judgment is bounded, feedback is strong, and no material non-local invariant
-must remain correct across many steps. On Claude Code, use the model-specific
-Sonnet or Opus profile and effort listed in the registry. On Cursor, select
-`high` or `xhigh` for Grok profiles; Composer 2.5 has no reasoning-effort
-setting.
+For built-in Codex/ChatGPT choices, use `medium` only with Sol. Select
+`sol-medium` when residual judgment is bounded, feedback is strong, and no
+material non-local invariant must remain correct across many steps. For
+built-in Claude Code choices, use the Sonnet or Opus effort listed in the
+registry. Built-in Cursor Grok profiles support `high` or `xhigh`; Composer 2.5
+has no reasoning-effort setting. For an additional candidate, use only the
+effort passed by the parent after host validation.
 
 Use `high` when one material reasoning hazard or several interdependent
 implementation decisions remain, including concurrency, ordering, lifecycle,
@@ -279,7 +303,8 @@ Use `xhigh` only when all of these gates are evidenced:
 
 Otherwise cap the initial effort at `high`. Treat `sol-high` as a compounded
 case, not the default Sol profile, and treat host-supported `xhigh` profiles as
-exceptional. Do not invent profiles. `luna-max` is the only `max` profile for
+exceptional. Do not invent profiles. `luna-max` is the only built-in `max`
+profile for
 Codex/ChatGPT and requires every qualified-Luna gate above; Sol does not offer
 `max` on those hosts. Claude Code's separate recovery mapping is documented in
 the registry.
@@ -309,7 +334,7 @@ order, use the order in which the work items were read and label it
 Use this structure:
 
 ```markdown
-# Work Item Execution Profile Report: <Story or ticket>
+# Work Item Execution Candidate Report: <Story or ticket>
 
 ## Authority snapshot
 - Source, revision, state, and relations
@@ -327,15 +352,15 @@ Use this structure:
 
 ## Recommendations
 
-| Work item | Scope summary | Execution profile | Why not lower | Confidence |
+| Work item | Scope summary | Execution candidate ID | Why not lower | Confidence |
 |---|---|---|---|---|
-| AB#... | ... | profile-id | ... | high |
+| AB#... | ... | profile-id or additional-id | ... | high |
 
 ## Work-item analysis
 
 ### AB#... — <title>
 - Evidence and complexity signals:
-- Execution profile:
+- Execution candidate ID:
 - Why this is the lowest-cost reliable profile:
 - Escalation triggers:
 - Unknowns:
@@ -346,7 +371,7 @@ Use this structure:
 2. AB#... — dependency or ordering reason
 
 ## Cost and sequencing summary
-- Work items by execution profile:
+- Work items by execution candidate ID:
 - Recommended execution order when authority defines one:
 - Conditions that require re-planning:
 
