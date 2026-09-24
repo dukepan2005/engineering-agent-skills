@@ -118,12 +118,10 @@ the planner to choose an implementation profile:
    official model/host documentation and benchmark evidence rules still apply
    to additional candidates.
 
-Only built-in profile IDs have registry-defined capacity fallbacks or review
-recovery mappings. A pair matching a built-in entry is resolved to that
-built-in ID; every other additional candidate has neither. If a dynamically
-selected candidate is rejected before starting, or later needs review
-escalation with no registry mapping, stop and request replanning; do not infer
-a fallback or recovery profile.
+Only built-in profile IDs have registry-defined capacity fallbacks. A pair
+matching a built-in entry is resolved to that built-in ID; every other
+additional candidate has no fallback. If a dynamically selected candidate is
+rejected before starting, stop and request replanning; do not infer a fallback.
 
 ## Planning Snapshot — spawn task-boards-ops
 
@@ -263,10 +261,9 @@ child directly; no child may start another child.
 | --- | --- | --- |
 | Preflight | one cheap Boards child | read-only tracker snapshot |
 | Implement | one planned-candidate child | implementation, tests, task commit |
-| Review round | two parallel read-only children | Standards axis and Spec axis |
-| Repair | one same-candidate child, only when findings exist | amend the same task commit and rerun verification |
-| Final review | two parallel read-only children | verify the repaired delta |
-| Recovery | one mapped stronger-profile child, only for blocking final findings | repair the existing delta; no review dispatch |
+| Review round 1 | two parallel read-only children | Standards axis and Spec axis |
+| Repair | one same-candidate child, only when round 1 has findings | amend the same task commit and rerun verification |
+| Review round 2 | two parallel read-only children, only after repair | verify the repaired delta |
 | Closeout | one cheap Boards child | evidence-backed Description update and close |
 
 Use [references/flat-review-worker.md](references/flat-review-worker.md) as the
@@ -391,44 +388,22 @@ aggregating. A malformed or mismatched review result is a failed review, not a
 clean result. The parent may combine the reports and pass them to a repair
 worker, but must not author findings or change the code itself.
 
-Run a first review round immediately after implementation. If it contains any
-actionable finding, spawn one repair worker at the same effective candidate with
+Run review round 1 immediately after implementation. If it is clean, proceed
+directly to closeout; do not run an unnecessary second round. If it contains
+any finding, spawn one repair worker at the same effective candidate with
 `reviewOwner=parent`, the original preflight scope, `reviewBase`, current task
 commit, and both complete review reports. Require it to repair the existing
 delta, rerun verification, and amend the same task commit; it must not invoke
 `$code-review`, spawn a child, create a second task commit, or perform Boards
-operations. If the repair fails, stop. Whether or not repair was needed, run a
-second pair of review workers against the resulting `reviewBase...HEAD` delta.
-
-If the second review has no blocking finding, the parent may mark the item
-`ready_for_closeout` while retaining both axis reports and any non-blocking
-findings in the delivery evidence. A blocking finding is P0/P1 or an explicitly
-blocking correctness, security, data-loss, or verification problem. Do not
-close the item or dispatch the next item while the second review is malformed
-or unresolved.
-
-### Review Escalation
-
-If the second flat review still has a blocking finding, do not run closeout or
-dispatch the next work item. Use the single post-fix recovery profile mapped
-for the current host in the canonical execution-profile registry. Do not
-duplicate or infer that mapping here; if the selected candidate is additional
-and has no exact registry mapping, report recovery as unavailable.
-
-Spawn exactly one recovery worker at that higher profile with the same work-item
-scope, the unresolved findings, and the current workspace. It must use
-`$azure-task-implement` with `reviewOwner=parent`, repair the existing task
-delta, rerun verification, and amend the same task commit. It must not invoke
-`$code-review`, spawn a child, or perform Boards operations. After recovery,
-the parent starts exactly one more pair of flat review workers. Record planned,
-initial effective, and recovery profiles. A host that cannot resolve its mapped
-profile must report `review_escalation_unavailable`; it must not substitute
-another profile. Do not auto-select an `xhigh` profile. Do not retry a second
-recovery worker, close the item, or dispatch later work while recovery is
-unresolved. If no mapped recovery profile is available, the
-recovery worker fails, or its final flat review still has a blocking finding,
-return `review_escalation_required` with the concrete findings and stop for
-human replanning.
+operations. If the repair fails, stop. After a successful repair, run review
+round 2 against the resulting `reviewBase...HEAD` delta. A clean
+round 2 permits closeout. If round 2 still has any findings, return
+`review_action_required` with the reports and remaining findings, then stop:
+do not close the item, dispatch another repair worker, or start a later
+work item. Wait for further human direction. Two dual-axis review rounds is the
+maximum; do not continue automated repair/review beyond that limit. A malformed
+or mismatched review is a failed review, never a clean result, and also stops
+the sequence.
 
 ### 4. Closeout — spawn helper agent
 
@@ -492,8 +467,7 @@ review/repair stage, and closeout complete successfully.
 
 Return one ordered summary. For every completed work item, include the planned
 and effective execution candidate IDs and exact model/effort mapping, any
-pre-start capacity fallback error (Codex/ChatGPT only), `reviewBase`, worker-reported commit and verification, both
-review-round axis reports, any repair/recovery profile, final tracker state,
+pre-start capacity fallback error (Codex/ChatGPT only), `reviewBase`, worker-reported commit and verification, completed review-round axis reports, final tracker state,
 and closeout result. For a stopped run, identify the work item and stage that
 stopped the sequence, retain earlier completed results, and state that later
 work items were not dispatched.

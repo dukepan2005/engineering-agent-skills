@@ -149,12 +149,15 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("`reviewOwner=parent`", text)
         self.assertRegex(text, r"do not invoke `\$code-review`, spawn review\s+agents")
         self.assertIn('"outcome": "ready_for_review"', text)
-        self.assertIn('`{"outcome":"ready_for_closeout", ...}`', text)
-        self.assertIn("review_escalation_required", text)
-        self.assertIn("P0/P1", text)
-        self.assertIn("again against the same `reviewBase...HEAD` delta", text)
+        self.assertIn('`{"outcome":"completed", ...}`', text)
+        self.assertIn("review_action_required", text)
+        self.assertRegex(text, r"Two review\s+rounds is the maximum")
+        self.assertIn("`implement-preflight` once with the explicit connection", text)
+        self.assertIn("retain its `rev`\nfor closeout", text)
+        self.assertIn("second dual-axis review against the same `reviewBase...HEAD` delta", text)
         self.assertIn("same task commit", text)
-        self.assertRegex(text, r"Do not perform Azure Boards\s+operations in either mode")
+        self.assertIn("close the work item through\n`$azure-devops-boards-skill`", text)
+        self.assertIn("Do not close the work item in this mode", text)
         self.assertNotIn("working-tree review mode", text)
         self.assertNotIn("skills/azure-task-implement/references", text)
 
@@ -282,7 +285,7 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("| `opus-high` | `opus` | `high` |", claude)
         self.assertIn("| `opus-max` | `opus` | `max` |", claude)
         self.assertIn("| `opus-xhigh` | `opus` | `xhigh` |", claude)
-        self.assertIn("Use `opus-max` only for the single post-fix recovery", claude)
+        self.assertNotIn("post-fix recovery", claude)
         self.assertNotRegex(claude, r"`(?:luna|sol)-")
 
         cursor = text.split("## Cursor", 1)[1].split("## Planning", 1)[0]
@@ -391,7 +394,7 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertNotIn("implement-preflight --id ${itemId}", script)
         self.assertNotIn("show --full --id ${itemId}", script)
 
-    def test_orchestrator_escalates_only_blocking_post_fix_review_findings(self) -> None:
+    def test_orchestrator_caps_dual_review_at_two_rounds(self) -> None:
         skill = self.read_skill("azure-task-orchestrator")
         script = (
             REPO_ROOT
@@ -401,16 +404,24 @@ class SkillDependencyContractTests(unittest.TestCase):
             / "claude-code-delivery-loop.js"
         ).read_text()
 
-        self.assertIn("Review Escalation", skill)
-        self.assertIn("review_escalation_required", skill)
-        self.assertRegex(skill, r"do not run\s+closeout or\s+dispatch the next work item")
-        self.assertIn("REVIEW_ESCALATION", script)
-        self.assertIn("review_escalation_required", script)
-        self.assertIn("review_escalation_failed", script)
-        self.assertIn("review_escalation_unavailable", script)
-        self.assertIn("canonical execution-profile registry", skill)
-        self.assertIn("Do not auto-select an `xhigh` profile", skill)
-        self.assertNotIn("`luna-high`, `sol-medium` →", skill)
+        self.assertIn("If it is clean, proceed\ndirectly to closeout", skill)
+        self.assertIn("If round 2 still has any findings, return", skill)
+        self.assertIn("review_action_required", skill)
+        self.assertNotIn("REVIEW_ESCALATION", script)
+        self.assertNotIn("review_escalation_", script)
+        self.assertEqual(
+            2,
+            script.count("runReviewRound({ item, implementation, preflightData, round:"),
+        )
+        self.assertIn("if (hasFindings(firstReview))", script)
+        self.assertIn("if (hasFindings(secondReview))", script)
+        self.assertIn("status: 'review_action_required'", script)
+        review_branch = script.split("if (hasFindings(firstReview)) {", 1)[1].split(
+            "// === Closeout after the first clean round or the second clean round ===",
+            1,
+        )[0]
+        self.assertIn("round: 2", review_branch)
+        self.assertIn("break", review_branch)
         registry = (
             REPO_ROOT
             / "skills"
@@ -418,17 +429,7 @@ class SkillDependencyContractTests(unittest.TestCase):
             / "references"
             / "execution-profiles.md"
         ).read_text()
-        self.assertIn(
-            "`sonnet-medium`, `sonnet-high`, `opus-medium` → `opus-high`;",
-            registry,
-        )
-        self.assertRegex(registry, r"`opus-high` →\s+`opus-max`\.")
-        self.assertIn("'sonnet-medium': 'opus-high'", script)
-        self.assertIn("'sonnet-high': 'opus-high'", script)
-        recovery_map = script.split("const REVIEW_ESCALATION = {", 1)[1].split("}", 1)[0]
-        self.assertNotRegex(recovery_map, r"xhigh")
-        self.assertIn("'opus-medium': 'opus-high'", script)
-        self.assertIn("'opus-high': 'opus-max'", script)
+        self.assertNotIn("post-fix review", registry)
 
 
 if __name__ == "__main__":

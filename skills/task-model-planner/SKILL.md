@@ -306,8 +306,7 @@ case, not the default Sol profile, and treat host-supported `xhigh` profiles as
 exceptional. Do not invent profiles. `luna-max` is the only built-in `max`
 profile for
 Codex/ChatGPT and requires every qualified-Luna gate above; Sol does not offer
-`max` on those hosts. Claude Code's separate recovery mapping is documented in
-the registry.
+`max` on those hosts.
 
 ## Explain Every Recommendation
 

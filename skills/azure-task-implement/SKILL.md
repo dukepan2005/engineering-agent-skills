@@ -20,6 +20,16 @@ If the caller omits the mode, treat it as `reviewOwner=self` for backward
 compatibility. The Azure orchestrator must state and always use
 `reviewOwner=parent`.
 
+In standalone `reviewOwner=self` mode, require an Azure work-item ID, the
+explicit tracker organization and project, and a current preflight revision.
+Resolve the connection from repository tracker guidance; if it is ambiguous,
+stop and request it. If the caller did not provide a current preflight, use
+`$azure-devops-boards-skill` in the `task-boards-ops` role to run
+`implement-preflight` once with the explicit connection and item ID before
+editing. Use its full result as current scope authority and retain its `rev`
+for closeout. In `reviewOwner=parent` mode, use the parent's supplied
+preflight and connection.
+
 Use `$tdd` where possible, at pre-agreed seams. Run typechecking regularly,
 single test files regularly, and the full test suite once at the end. Re-read
 repository authority before editing, and protect unrelated user changes.
@@ -71,23 +81,40 @@ Never discard user-owned changes.
 
 ## Standalone review-owner=self mode
 
-When the caller selects `reviewOwner=self`, keep the standalone wrapper flow:
-after implementation and the task-only review commit, invoke `$code-review`,
-fix every actionable finding, rerun the relevant verification, and invoke
-`$code-review` again against the same `reviewBase...HEAD` delta. If the
-post-fix review has a P0/P1 finding, another explicitly blocking
-correctness/security/data-loss regression, or verification still cannot support
-the task, return:
+When the caller selects `reviewOwner=self`, after implementation and the
+task-only commit, run a dual-axis `$code-review`. If the first review is clean,
+proceed directly to Boards closeout; do not run an unneeded second review. If
+it reports findings, repair them, rerun relevant verification, and run the
+second dual-axis review against the same `reviewBase...HEAD` delta. Two review
+rounds is the maximum. If the second review still reports any findings, stop
+without closeout and return the findings for human direction. A failed or
+malformed review is never clean and also stops the workflow. Return:
 
 ```json
 {
-  "outcome": "review_escalation_required",
-  "blockingFindings": [{"priority": "P1", "location": "...", "summary": "..."}],
+  "outcome": "review_action_required",
+  "remainingFindings": [{"priority": "P1", "location": "...", "summary": "..."}],
   "verification": ["..."],
   "commit": "<current task commit or null>"
 }
 ```
 
-Otherwise return `{"outcome":"ready_for_closeout", ...}` with the commit,
-verification, and both review summaries. Do not perform Azure Boards
-operations in either mode.
+When either review round is clean, close the work item through
+`$azure-devops-boards-skill` in its semantic `task-boards-ops` role. Map every
+Acceptance criterion to concrete current-code evidence; update only checklist
+markers supported by that mapping, preserve the rest of the Description, post a
+completion comment, and close to the repository's documented terminal state
+(normally `Closed`). Use `close-task --apply` with the preflight revision as
+`--expected-rev`; if it is stale, stop without retrying or claiming completion.
+Return `{"outcome":"completed", ...}` with the commit, verification, review
+summary, final tracker state, and closeout result. If closeout cannot be
+performed after a clean review, stop and report the concrete blocker rather
+than claiming completion.
+
+## Parent-owned review-owner=parent mode
+
+The parent owns both review rounds and Boards closeout. Run at most two
+dual-axis rounds: if round one is clean, the parent may close out immediately;
+if it has findings, repair and run round two; if round two still has any
+findings, stop for human direction. After implementation, return
+`ready_for_review` as specified above. Do not close the work item in this mode.

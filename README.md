@@ -20,10 +20,13 @@ Codex, Claude Code, and Cursor.
 
 `azure-task-implement` preserves the local implementation workflow from Matt
 Pocock's `$implement` Skill. It supports a standalone `reviewOwner=self` mode
-that keeps the `$code-review` handoff, and a parent-owned `reviewOwner=parent`
-mode used by the Azure orchestrator. In the latter mode the implementation
-worker does not spawn review children; the parent launches the two review axes
-directly. The host must make `$code-review` available for standalone mode;
+that keeps the `$code-review` handoff and performs evidence-backed Boards
+closeout after a clean review, and a parent-owned `reviewOwner=parent` mode used
+by the Azure orchestrator. Both allow at most two dual-axis review rounds;
+remaining findings stop for human direction. In the latter mode the
+implementation worker does not spawn review children; the parent launches the
+two review axes directly. The host must make `$code-review` available for
+standalone mode;
 the orchestrator's flat review workers use the bundled axis contract and do not
 invoke the external coordinator.
 
@@ -101,9 +104,9 @@ work item the parent controls a flat sequence:
    `reviewOwner=parent` mode for code, tests, and one task commit.
 3. **Review** (two cheap workers in parallel) — runs the Standards and Spec
    axes without allowing either worker to spawn children.
-4. **Repair and review** — sends findings back to the implementation worker,
-   amends the same commit, and repeats both review axes; one mapped stronger
-   recovery worker is allowed only for blocking findings.
+4. **Repair and review** — if round one finds issues, repairs and reviews the
+   same delta once more. Two dual-axis rounds maximum; remaining findings stop
+   the run for human direction. A clean first or second round proceeds to closeout.
 5. **Closeout** (cheap model, low reasoning) — checks evidence-backed
    Description checklist items, posts the completion comment, and closes the
    work item with optimistic revision checking.

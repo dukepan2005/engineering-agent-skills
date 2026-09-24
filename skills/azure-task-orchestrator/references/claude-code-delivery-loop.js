@@ -33,8 +33,9 @@ export const meta = {
   phases: [
     { title: 'Preflight', detail: 'Read work-item scope and acceptance criteria' },
     { title: 'Implement', detail: 'Implement with exact model and reasoning effort' },
-    { title: 'Review', detail: 'Run Standards and Spec review workers in parallel' },
+    { title: 'Review round 1', detail: 'Run Standards and Spec review workers in parallel' },
     { title: 'Repair', detail: 'Repair findings and amend the same task commit' },
+    { title: 'Review round 2', detail: 'Re-review the repaired delta, at most once' },
     { title: 'Closeout', detail: 'Close item and update checklist with evidence' },
   ],
 }
@@ -48,15 +49,6 @@ const PROFILES = {
   'opus-high': { model: 'opus', effort: 'high' },
   'opus-max': { model: 'opus', effort: 'max' },
   'opus-xhigh': { model: 'opus', effort: 'xhigh' },
-}
-
-// A completed flat review still has a blocking finding; recovery gets one
-// stronger profile. This is not a normal planning-ladder fallback.
-const REVIEW_ESCALATION = {
-  'sonnet-medium': 'opus-high',
-  'sonnet-high': 'opus-high',
-  'opus-medium': 'opus-high',
-  'opus-high': 'opus-max',
 }
 
 function resolveCandidate(candidateId) {
@@ -142,12 +134,6 @@ function parseReview(value, axis, reviewBase, label) {
 
 function hasFindings(reports) {
   return reports.some((report) => report.findings.length > 0)
-}
-
-function blockingFindings(reports) {
-  return reports.flatMap((report) => report.findings.filter(
-    (finding) => finding.blocking === true || finding.priority === 'P0' || finding.priority === 'P1'
-  ).map((finding) => ({ ...finding, axis: report.axis })))
 }
 
 function shellQuote(value) {
@@ -313,8 +299,9 @@ ${JSON.stringify(preflightData, null, 2)}
     const firstReview = await runReviewRound({ item, implementation, preflightData, round: 1 })
     reviewRounds.push(firstReview)
 
-    // Repair every finding before the required second review round.
+    // A clean first review proceeds straight to closeout.
     if (hasFindings(firstReview)) {
+      // Repair every finding before the sole allowed follow-up review.
       implementation = await runRepair({
         item,
         implementation,
@@ -326,47 +313,19 @@ ${JSON.stringify(preflightData, null, 2)}
       if (implementation.outcome === 'implementation_failed') {
         throw new Error(`repair failed: ${compact(implementation.blocker || implementation.remainingWork || implementation)}`)
       }
-    }
-
-    // === STEP 4: Required post-fix review round ===
-    const secondReview = await runReviewRound({ item, implementation, preflightData, round: 2 })
-    reviewRounds.push(secondReview)
-    let unresolvedBlocking = blockingFindings(secondReview)
-
-    // === STEP 5: One stronger recovery, then one final flat review ===
-    let recoveryProfile = null
-    if (unresolvedBlocking.length > 0) {
-      recoveryProfile = REVIEW_ESCALATION[effectiveCandidate]
-      if (!recoveryProfile || !PROFILES[recoveryProfile]) {
-        results.push({ id: itemId, type: itemType, plannedCandidate, effectiveCandidate, status: 'review_escalation_unavailable', blockingFindings: unresolvedBlocking })
-        stoppedAt = itemId
-        break
-      }
-      implementation = await runRepair({
-        item,
-        implementation,
-        preflightData,
-        reports: secondReview,
-        candidateId: recoveryProfile,
-        label: `Review recovery ${recoveryProfile}`,
-      })
-      if (implementation.outcome === 'implementation_failed') {
-        results.push({ id: itemId, type: itemType, plannedCandidate, effectiveCandidate, recoveryProfile, status: 'review_escalation_failed', error: compact(implementation.blocker || implementation.remainingWork || implementation) })
-        stoppedAt = itemId
-        break
-      }
-      effectiveCandidate = recoveryProfile
-      const recoveryReview = await runReviewRound({ item, implementation, preflightData, round: 'recovery' })
-      reviewRounds.push(recoveryReview)
-      unresolvedBlocking = blockingFindings(recoveryReview)
-      if (unresolvedBlocking.length > 0) {
-        results.push({ id: itemId, type: itemType, plannedCandidate, effectiveCandidate, recoveryProfile, status: 'review_escalation_required', blockingFindings: unresolvedBlocking, reviewRounds })
+      const secondReview = await runReviewRound({ item, implementation, preflightData, round: 2 })
+      reviewRounds.push(secondReview)
+      if (hasFindings(secondReview)) {
+        const remainingFindings = secondReview.flatMap((report) =>
+          report.findings.map((finding) => ({ ...finding, axis: report.axis }))
+        )
+        results.push({ id: itemId, type: itemType, plannedCandidate, effectiveCandidate, status: 'review_action_required', remainingFindings, reviewRounds })
         stoppedAt = itemId
         break
       }
     }
 
-    // === STEP 6: Closeout ===
+    // === Closeout after the first clean round or the second clean round ===
     phase('Closeout')
     const implementationSummary = JSON.stringify({ implementation, reviewRounds })
     const preflightRev = preflightData.rev || preflightData.revision || 'unknown'
@@ -385,7 +344,6 @@ ${implementationSummary}`,
       type: itemType,
       plannedCandidate,
       effectiveCandidate,
-      recoveryProfile,
       reviewBase: implementation.reviewBase,
       commit: implementation.commit,
       verification: implementation.verification,
@@ -413,7 +371,6 @@ const reportedResults = results.map((result) => ({
   ...result,
   plannedMapping: describeCandidate(result.plannedCandidate),
   effectiveMapping: describeCandidate(result.effectiveCandidate),
-  ...(result.recoveryProfile ? { recoveryMapping: describeCandidate(result.recoveryProfile) } : {}),
 }))
 
 const report = {

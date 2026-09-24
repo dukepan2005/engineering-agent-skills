@@ -33,8 +33,7 @@ the host explicitly reports that the requested reasoning effort or capacity is
 unavailable. The retry must use the listed profile, preserve the model, and be
 recorded with the planned profile, effective profile, and host error. A blank
 fallback stops the run. Never use it after a worker starts, for a work-item failure,
-or for a model-wide availability error. This does not govern the separate,
-one-time post-fix-review escalation defined by `$azure-task-orchestrator`.
+or for a model-wide availability error.
 
 ## Claude Code
 
@@ -53,9 +52,6 @@ Use Claude model-specific profile IDs:
 | `opus-high` | `opus` | `high` |
 | `opus-max` | `opus` | `max` |
 | `opus-xhigh` | `opus` | `xhigh` |
-
-Use `opus-max` only for the single post-fix recovery mapped below; do not
-select it for regular planning.
 
 `model` and `effort` here are exactly the `opts.model` and `opts.effort`
 fields of a `Workflow` script's `agent()` call. The bare `Agent` tool cannot
@@ -79,7 +75,7 @@ Do not infer a capability ranking or automatic fallback between Grok versions.
 | `grok4.7-high` | `grok4.7` | `high` |
 | `grok4.7-xhigh` | `grok4.7` | `xhigh` |
 
-## Planning and review-recovery escalation
+## Planning profiles
 
 For Codex/ChatGPT, use `luna-high`, `sol-medium`, or `sol-high` according to
 the model-family and effort guidance in `../SKILL.md`. For Claude Code, use a
@@ -91,34 +87,3 @@ the gates in `../SKILL.md` before selecting one.
 
 Select `luna-max` only on Codex/ChatGPT and only when the separate Luna gates
 in `../SKILL.md` are all met.
-
-For one post-fix review recovery triggered by a returned P0/P1 or explicitly
-blocking correctness, security, data-loss, or verification finding, use this
-separate mapping. Do not automatically select an `xhigh` profile for recovery.
-
-Codex/ChatGPT:
-
-`luna-high`, `luna-max`, `sol-medium` → `sol-high`.
-
-`luna-xhigh`, `sol-high`, and `sol-xhigh` have no recovery mapping; report
-recovery as unavailable.
-
-Claude Code:
-
-`sonnet-medium`, `sonnet-high`, `opus-medium` → `opus-high`; `opus-high` →
-`opus-max`.
-
-Claude Code has no recovery mapping for `sonnet-xhigh`, `opus-max`, or
-`opus-xhigh`; report recovery as unavailable rather than substituting another
-profile.
-
-Cursor:
-
-Cursor defines no post-fix recovery mapping. Report recovery as unavailable
-rather than selecting a different Grok version or automatically choosing
-`xhigh`.
-
-These are single post-fix-review recovery steps, not capacity fallbacks. A host
-must report recovery as unavailable if it cannot resolve the mapped profile; it
-must not substitute another profile. Stop if the recovery review remains
-blocking.
