@@ -13,13 +13,15 @@ The parent supplies each worker with:
 - `reviewAxis`: `standards` or `spec`;
 - `reviewBase`: the implementation worker's starting commit;
 - `head`: the implementation worker's current task commit;
+- `expectedParent`: the commit that must immediately precede `head`;
 - the work-item scope and acceptance evidence;
 - the first-round review reports and repair findings when this is a later
   round.
 
-The worker must resolve `reviewBase`, confirm that
-`git diff <reviewBase>...HEAD` is non-empty, and inspect the actual diff. Do
-not review a guessed range, a PR's advertised base, or only the latest commit.
+The worker must resolve `reviewBase`, confirm that HEAD matches the supplied
+`head`, verify that `git rev-parse HEAD^` equals `expectedParent`, confirm that
+`git diff <reviewBase>...HEAD` is non-empty, and inspect the actual diff. Do not
+review a guessed range, a PR's advertised base, or only the latest commit.
 The worker must not change the working tree or Git refs while reviewing.
 
 ## Axis rules
@@ -69,14 +71,15 @@ Return JSON only:
   "axis": "standards",
   "reviewBase": "<sha>",
   "head": "<sha>",
+  "parent": "<sha>",
   "status": "clean",
   "findings": [],
   "summary": "..."
 }
 ```
 
-`axis` must match the requested axis and `reviewBase` must match the supplied
-fixed point. Use `status: "findings"` when findings exist and
+`axis` must match the requested axis; `reviewBase`, `head`, and `parent` must
+match their supplied expected values. Use `status: "findings"` when findings exist and
 `status: "no_spec_available"` only for the Spec axis. Every finding must
 include `priority` (`P0`–`P3`), `location`, `summary`, and `evidence`; set
 `blocking: true` only for a P0/P1 or an explicitly blocking correctness,

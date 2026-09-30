@@ -239,7 +239,8 @@ pre-start capacity fallback profile if one exists; for an additional candidate,
 show that no fallback is defined. Claude Code and Cursor have no built-in
 pre-start fallback, so omit that column there.
 State that confirmation authorizes sequential delivery, including code changes,
-one commit per successful work item, and Azure Boards closeout.
+an implementation commit, a separate repair commit if findings require one,
+and Azure Boards closeout.
 
 Wait for an explicit user confirmation of that displayed plan, for example
 `确认执行该计划` or `confirm this plan`. Do not treat a prior approval, an
@@ -262,7 +263,7 @@ child directly; no child may start another child.
 | Preflight | one cheap Boards child | read-only tracker snapshot |
 | Implement | one planned-candidate child | implementation, tests, task commit |
 | Review round 1 | two parallel read-only children | Standards axis and Spec axis |
-| Repair | one same-candidate child, only when round 1 has findings | amend the same task commit and rerun verification |
+| Repair | one same-candidate child, only when round 1 has findings | rerun verification and create a separate repair commit |
 | Review round 2 | two parallel read-only children, only after repair | verify the repaired delta |
 | Closeout | one cheap Boards child | evidence-backed Description update and close |
 
@@ -376,6 +377,8 @@ outcome, stop immediately. Do not dispatch later work items.
 For each review round, the parent starts two read-only children in parallel,
 one with `reviewAxis=standards` and one with `reviewAxis=spec`, using the exact
 `reviewBase` and current task commit returned by the implementation worker.
+Supply `expectedParent=reviewBase` for round 1 and the initial implementation
+commit as `expectedParent` for round 2.
 Give both workers the work-item scope, acceptance evidence, and
 [the flat worker contract](references/flat-review-worker.md). They must return
 the contract's JSON without editing code, Git, Boards, or spawning children.
@@ -383,7 +386,8 @@ Use the shared host-specific helper-agent profile above; on Claude Code use
 `agent(prompt, {model: 'haiku', effort: 'low', label})` for both axes. On
 Cursor, use `composer2.5` without an effort field for both axes.
 
-Validate both axis labels, the fixed point, and the non-empty diff before
+Validate both axis labels, the fixed point, the reviewed head and its parent,
+and the non-empty diff before
 aggregating. A malformed or mismatched review result is a failed review, not a
 clean result. The parent may combine the reports and pass them to a repair
 worker, but must not author findings or change the code itself.
@@ -393,9 +397,11 @@ directly to closeout; do not run an unnecessary second round. If it contains
 any finding, spawn one repair worker at the same effective candidate with
 `reviewOwner=parent`, the original preflight scope, `reviewBase`, current task
 commit, and both complete review reports. Require it to repair the existing
-delta, rerun verification, and amend the same task commit; it must not invoke
-`$code-review`, spawn a child, create a second task commit, or perform Boards
-operations. If the repair fails, stop. After a successful repair, run review
+delta, rerun verification, and create one separate task-only repair commit on
+top of the implementation commit; it must not invoke `$code-review`, spawn a
+child, or perform Boards operations. Validate the repair commit's parent is
+the prior task commit and `reviewBase` is unchanged. If the repair fails, stop.
+After a successful repair, run review
 round 2 against the resulting `reviewBase...HEAD` delta. A clean
 round 2 permits closeout. If round 2 still has any findings, return
 `review_action_required` with the reports and remaining findings, then stop:
@@ -467,7 +473,9 @@ review/repair stage, and closeout complete successfully.
 
 Return one ordered summary. For every completed work item, include the planned
 and effective execution candidate IDs and exact model/effort mapping, any
-pre-start capacity fallback error (Codex/ChatGPT only), `reviewBase`, worker-reported commit and verification, completed review-round axis reports, final tracker state,
+pre-start capacity fallback error (Codex/ChatGPT only), `reviewBase`, initial
+implementation commit, repair commit when present, worker-reported verification,
+completed review-round axis reports, final tracker state,
 and closeout result. For a stopped run, identify the work item and stage that
 stopped the sequence, retain earlier completed results, and state that later
 work items were not dispatched.

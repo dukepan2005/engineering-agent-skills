@@ -37,10 +37,12 @@ repository authority before editing, and protect unrelated user changes.
 ## Commit and review handoff
 
 Capture the task's starting commit before editing. If unrelated user changes
-cannot be isolated, stop and report that blocker. Before returning a successful
-implementation, create one task-only, unpushed commit on the current branch.
-Return the starting commit as `reviewBase` (also `taskStartCommit`) and the
-current task commit as `commit`; the parent will review
+cannot be isolated, stop and report that blocker. After implementation, create
+one task-only, unpushed commit on the current branch. If review findings require
+repair, make a separate task-only repair commit after verification. Keep the
+implementation commit intact and leave both commits unpushed. Return the
+starting commit as `reviewBase` (also `taskStartCommit`) and the latest task
+commit as `commit`; the parent will review
 `git diff <reviewBase>...HEAD`.
 
 In `reviewOwner=parent` mode, do not invoke `$code-review`, spawn review
@@ -73,9 +75,11 @@ the current commit (or `null`). Do not claim review or closeout readiness.
 
 When the parent supplies review findings in `reviewOwner=parent` mode, preserve
 the existing task delta and `reviewBase`, repair every actionable finding that
-is in scope, rerun the relevant verification, and amend the same task commit.
-Do not create a second task commit merely to address review findings. Return
-the same `ready_for_review` shape with updated evidence. If repair or
+is in scope, rerun the relevant verification, and create one separate repair
+commit on top of the implementation commit. Confirm the starting HEAD is the
+commit supplied by the parent and the new commit's parent is that same commit.
+Return the same `ready_for_review` shape with the repair commit as `commit` and
+the original `reviewBase`. If repair or
 verification fails, return `implementation_failed` and the concrete blocker.
 Never discard user-owned changes.
 
@@ -84,8 +88,9 @@ Never discard user-owned changes.
 When the caller selects `reviewOwner=self`, after implementation and the
 task-only commit, run a dual-axis `$code-review`. If the first review is clean,
 proceed directly to Boards closeout; do not run an unneeded second review. If
-it reports findings, repair them, rerun relevant verification, and run the
-second dual-axis review against the same `reviewBase...HEAD` delta. Two review
+it reports findings, repair them, rerun relevant verification, create a separate
+repair commit whose parent is the implementation commit, and run the second
+dual-axis review against the same `reviewBase...HEAD` delta. Two review
 rounds is the maximum. If the second review still reports any findings, stop
 without closeout and return the findings for human direction. A failed or
 malformed review is never clean and also stops the workflow. Return:
@@ -106,10 +111,10 @@ markers supported by that mapping, preserve the rest of the Description, post a
 completion comment, and close to the repository's documented terminal state
 (normally `Closed`). Use `close-task --apply` with the preflight revision as
 `--expected-rev`; if it is stale, stop without retrying or claiming completion.
-Return `{"outcome":"completed", ...}` with the commit, verification, review
-summary, final tracker state, and closeout result. If closeout cannot be
-performed after a clean review, stop and report the concrete blocker rather
-than claiming completion.
+Return `{"outcome":"completed", ...}` with both commit IDs when repair was
+needed, verification, review summary, final tracker state, and closeout result.
+If closeout cannot be performed after a clean review, stop and report the
+concrete blocker rather than claiming completion.
 
 ## Parent-owned review-owner=parent mode
 

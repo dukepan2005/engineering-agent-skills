@@ -104,9 +104,10 @@ work item the parent controls a flat sequence:
    `reviewOwner=parent` mode for code, tests, and one task commit.
 3. **Review** (two cheap workers in parallel) — runs the Standards and Spec
    axes without allowing either worker to spawn children.
-4. **Repair and review** — if round one finds issues, repairs and reviews the
-   same delta once more. Two dual-axis rounds maximum; remaining findings stop
-   the run for human direction. A clean first or second round proceeds to closeout.
+4. **Repair and review** — if round one finds issues, creates a separate repair
+   commit and reviews the full task delta once more. Two dual-axis rounds
+   maximum; remaining findings stop the run for human direction. A clean first
+   or second round proceeds to closeout.
 5. **Closeout** (cheap model, low reasoning) — checks evidence-backed
    Description checklist items, posts the completion comment, and closes the
    work item with optimistic revision checking.

@@ -34,7 +34,7 @@ export const meta = {
     { title: 'Preflight', detail: 'Read work-item scope and acceptance criteria' },
     { title: 'Implement', detail: 'Implement with exact model and reasoning effort' },
     { title: 'Review round 1', detail: 'Run Standards and Spec review workers in parallel' },
-    { title: 'Repair', detail: 'Repair findings and amend the same task commit' },
+    { title: 'Repair', detail: 'Repair findings in a separate commit' },
     { title: 'Review round 2', detail: 'Re-review the repaired delta, at most once' },
     { title: 'Closeout', detail: 'Close item and update checklist with evidence' },
   ],
@@ -112,10 +112,11 @@ function parseImplementation(value, label) {
   return result
 }
 
-function parseReview(value, axis, reviewBase, label) {
+function parseReview(value, axis, reviewBase, head, expectedParent, label) {
   const result = parseJson(value, label)
-  if (!result || result.axis !== axis || result.reviewBase !== reviewBase || !result.head) {
-    throw new Error(`${label} must preserve axis, reviewBase, and head`)
+  if (!result || result.axis !== axis || result.reviewBase !== reviewBase
+    || result.head !== head || result.parent !== expectedParent) {
+    throw new Error(`${label} must preserve axis, reviewBase, head, and parent`)
   }
   if (!['clean', 'findings', 'no_spec_available'].includes(result.status)) {
     throw new Error(`${label} has an invalid status`)
@@ -146,7 +147,7 @@ function parsePreflight(value, itemId) {
   return result
 }
 
-async function runReviewRound({ item, implementation, preflightData, round }) {
+async function runReviewRound({ item, implementation, preflightData, round, expectedParent }) {
   phase(`Review ${round}`)
   const fixedPoint = implementation.reviewBase
   const head = implementation.commit
@@ -155,6 +156,7 @@ Work item: ${item.id} (${item.type || 'Task'})
 Review round: ${round}
 Fixed point: ${fixedPoint}
 Expected task commit: ${head}
+Expected head parent: ${expectedParent}
 
 Preflight scope:
 ${JSON.stringify(preflightData, null, 2)}
@@ -168,7 +170,7 @@ Use the flat review worker contract at
 the supplied fixed point. Do not invoke an external review coordinator, do not
 spawn or call another agent, and do not edit code, Git, Azure Boards, or any
 file. Inspect the actual diff and return JSON only with axis, reviewBase, head,
-status, findings, and summary.
+parent, status, findings, and summary.
 ${shared}`
 
   const [standardsResult, specResult] = await Promise.all([
@@ -186,8 +188,8 @@ ${shared}`
 
   if (!standardsResult || !specResult) throw new Error(`review ${round} child returned null`)
   return [
-    parseReview(standardsResult, 'standards', fixedPoint, `standards review ${round}`),
-    parseReview(specResult, 'spec', fixedPoint, `spec review ${round}`),
+    parseReview(standardsResult, 'standards', fixedPoint, head, expectedParent, `standards review ${round}`),
+    parseReview(specResult, 'spec', fixedPoint, head, expectedParent, `spec review ${round}`),
   ]
 }
 
@@ -203,9 +205,10 @@ async function runRepair({ item, implementation, preflightData, reports, candida
     `Use \`$azure-task-implement\` with \`reviewOwner=parent\` in ${label} mode for
 work item ${item.id}. Preserve user-owned changes, the original reviewBase, and
 the existing task delta. Repair every supplied actionable finding, rerun the
-relevant verification, and amend the same task commit. Do not invoke
-\`$code-review\`, spawn any child, create a second task commit, or perform
-Azure Boards operations. Return JSON only using the implementation Skill's
+relevant verification, and create one separate repair commit on top of the
+supplied implementation commit. Keep that commit intact. Do not invoke
+\`$code-review\`, spawn any child, amend a commit, or perform Azure Boards
+operations. Return JSON only using the implementation Skill's
 ready_for_review or implementation_failed contract.
 
 Effective candidate: ${candidateId}
@@ -258,6 +261,8 @@ for (let i = 0; i < plan.length; i++) {
   const plannedCandidate = item.plannedCandidate
   let effectiveCandidate = plannedCandidate
   let implementation = null
+  let implementationCommit = null
+  let repairCommit = null
   let reviewRounds = []
 
   log(`[${i + 1}/${plan.length}] ${itemId}: preflight → implement → flat review/repair → closeout`)
@@ -294,15 +299,16 @@ ${JSON.stringify(preflightData, null, 2)}
     if (implementation.outcome === 'implementation_failed') {
       throw new Error(`implementation failed: ${compact(implementation.blocker || implementation.remainingWork || implementation)}`)
     }
+    implementationCommit = implementation.commit
 
     // === STEP 3: Review round 1 ===
-    const firstReview = await runReviewRound({ item, implementation, preflightData, round: 1 })
+    const firstReview = await runReviewRound({ item, implementation, preflightData, round: 1, expectedParent: implementation.reviewBase })
     reviewRounds.push(firstReview)
 
     // A clean first review proceeds straight to closeout.
     if (hasFindings(firstReview)) {
       // Repair every finding before the sole allowed follow-up review.
-      implementation = await runRepair({
+      const repaired = await runRepair({
         item,
         implementation,
         preflightData,
@@ -310,16 +316,21 @@ ${JSON.stringify(preflightData, null, 2)}
         candidateId: effectiveCandidate,
         label: 'Repair',
       })
-      if (implementation.outcome === 'implementation_failed') {
-        throw new Error(`repair failed: ${compact(implementation.blocker || implementation.remainingWork || implementation)}`)
+      if (repaired.outcome === 'implementation_failed') {
+        throw new Error(`repair failed: ${compact(repaired.blocker || repaired.remainingWork || repaired)}`)
       }
-      const secondReview = await runReviewRound({ item, implementation, preflightData, round: 2 })
+      if (repaired.reviewBase !== implementation.reviewBase || repaired.commit === implementation.commit) {
+        throw new Error('repair must preserve reviewBase and return a new commit')
+      }
+      repairCommit = repaired.commit
+      implementation = repaired
+      const secondReview = await runReviewRound({ item, implementation, preflightData, round: 2, expectedParent: implementationCommit })
       reviewRounds.push(secondReview)
       if (hasFindings(secondReview)) {
         const remainingFindings = secondReview.flatMap((report) =>
           report.findings.map((finding) => ({ ...finding, axis: report.axis }))
         )
-        results.push({ id: itemId, type: itemType, plannedCandidate, effectiveCandidate, status: 'review_action_required', remainingFindings, reviewRounds })
+        results.push({ id: itemId, type: itemType, plannedCandidate, effectiveCandidate, implementationCommit, repairCommit, status: 'review_action_required', remainingFindings, reviewRounds })
         stoppedAt = itemId
         break
       }
@@ -327,7 +338,7 @@ ${JSON.stringify(preflightData, null, 2)}
 
     // === Closeout after the first clean round or the second clean round ===
     phase('Closeout')
-    const implementationSummary = JSON.stringify({ implementation, reviewRounds })
+    const implementationSummary = JSON.stringify({ implementationCommit, repairCommit, implementation, reviewRounds })
     const preflightRev = preflightData.rev || preflightData.revision || 'unknown'
     const closeoutResult = await agent(
       `Use \`$azure-devops-boards-skill\` in its semantic \`task-boards-ops\` role. Read the current full Description with \`show ${boardsConnectionArgs} --full --id ${itemId}\`. Apply only the evidence-backed Markdown checklist changes specified by the implementation and review summary, preserving all other Description content. Write the rewritten Description to \`/tmp/description_${itemId}.md\` and a Markdown completion comment to \`/tmp/comment_${itemId}.md\`. Then run \`close-task --apply ${boardsConnectionArgs} --id ${itemId} --expected-rev ${preflightRev} --state Closed --description-file /tmp/description_${itemId}.md --comment-file /tmp/comment_${itemId}.md\`. Return the JSON output unchanged. Do not use \`--check-ac\`, and do not perform any non-Boards work.
@@ -345,6 +356,8 @@ ${implementationSummary}`,
       plannedCandidate,
       effectiveCandidate,
       reviewBase: implementation.reviewBase,
+      implementationCommit,
+      repairCommit,
       commit: implementation.commit,
       verification: implementation.verification,
       reviewRounds,
@@ -358,6 +371,8 @@ ${implementationSummary}`,
       type: itemType,
       plannedCandidate,
       effectiveCandidate,
+      implementationCommit,
+      repairCommit,
       status: 'delivery_failed',
       error: error.message,
       reviewRounds,
