@@ -15,6 +15,7 @@ Codex, Claude Code, and Cursor.
 | [`task-model-planner`](skills/task-model-planner/) | Recommend one source-backed, lowest-cost reliable execution candidate from a parent-provided work-item snapshot and linked specification authority. |
 | [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver implementation-ready Azure Boards work items from a Story or an explicit item set with parent-owned flat implementation, two-axis review, repair, and closeout workers. |
 | [`explaining-code-changes`](skills/explaining-code-changes/) | Explain a commit or commit range (single SHA, `a..b`, or any git-diff-style revision argument) — what changed, what each piece does, and why — for ordinary/junior developers. |
+| [`testflight-what-to-test`](skills/testflight-what-to-test/) | Write short English TestFlight What to Test notes a tester can read on a phone. |
 
 ## Review Dependency
 
