@@ -1,6 +1,6 @@
 ---
 name: azure-devops-boards-skill
-description: Safely create, inspect, update, comment on, and link Azure DevOps Boards work items using the locally authenticated Azure CLI. Use when Codex, Claude Code, Cursor, or another compatible host needs to manage Azure Boards Epics, Features, Stories, Tasks, Bugs, Markdown descriptions or comments, Sprint assignment, parent-child relations, blocking dependencies, or related links across any repository or Azure DevOps project. Also use when the to-spec, to-tickets, or implement skill needs to publish or update Azure DevOps work items.
+description: Safely create, inspect, update, comment on, and link Azure DevOps Boards work items using the locally authenticated Azure CLI. Use when Codex, Claude Code, Cursor, or another compatible host needs to manage Azure Boards Epics, Features, Stories, Tasks, Bugs, Markdown descriptions or comments, Sprint assignment, parent-child relations, blocking dependencies, or related links across any repository or Azure DevOps project. Also use when the to-spec, to-tickets, or implement skill needs to publish or update Azure DevOps work items. add-link accepts only parent, predecessor, and related work-item links. Branch, commit, and pull request artifacts are outside this helper; do not invent a branch-link command.
 allowed-tools: Bash(sh *)
 ---
 
@@ -37,6 +37,11 @@ and parameters. The child returns structured JSON.
 Do not run any helper command yourself. Do not read
 `references/commands.md` into this router context. Do not search for duplicate
 work items before creating one.
+
+`add-link` accepts only `parent`, `predecessor`, and `related`, each with a
+work-item id. Branch, commit, and pull request artifacts are not helper
+operations. Do not invent a `branch-link` subcommand, and do not push the
+Azure DevOps git remote to create one.
 
 ## Boards child mode: execute the local helper
 
