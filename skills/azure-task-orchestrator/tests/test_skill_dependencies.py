@@ -278,11 +278,21 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn("## Codex / ChatGPT", text)
         self.assertIn("## Claude Code", text)
         self.assertIn("## Cursor", text)
-        self.assertIn("| `luna-high` | `gpt-6-luna` | `high` | — |", text)
-        self.assertIn("| `luna-xhigh` | `gpt-6-luna` | `xhigh` | `luna-high` |", text)
-        self.assertIn("| `luna-max` | `gpt-6-luna` | `max` | — |", text)
-        self.assertIn("| `sol-medium` | `gpt-6-sol` | `medium` | — |", text)
-        self.assertIn("| `sol-xhigh` | `gpt-6-sol` | `xhigh` | `sol-high` |", text)
+        codex = text.split("## Codex / ChatGPT", 1)[1].split("## Claude Code", 1)[0]
+        self.assertEqual(
+            [
+                ("luna-max", "gpt-6-luna", "max", "—"),
+                ("sol-medium", "gpt-6.1-sol", "medium", "—"),
+                ("sol-high", "gpt-6.1-sol", "high", "`sol-medium`"),
+                ("sol-xhigh", "gpt-6.1-sol", "xhigh", "`sol-high`"),
+            ],
+            re.findall(
+                r"^\| `([^`]+)` \| `([^`]+)` \| `([^`]+)` \| (—|`[^`]+`) \|$",
+                codex,
+                re.MULTILINE,
+            ),
+        )
+        self.assertIn("only built-in Codex/ChatGPT execution candidates", codex)
         claude = text.split("## Claude Code", 1)[1].split("## Cursor", 1)[0]
         self.assertIn("| `sonnet-medium` | `sonnet` | `medium` |", claude)
         self.assertIn("| `sonnet-high` | `sonnet` | `high` |", claude)

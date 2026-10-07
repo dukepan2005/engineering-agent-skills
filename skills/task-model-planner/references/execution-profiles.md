@@ -15,16 +15,14 @@ model configuration only when spawning the child agent.
 
 | Profile ID | Model | Reasoning effort | Pre-start capacity fallback |
 |---|---|---|---|
-| `luna-high` | `gpt-6-luna` | `high` | — |
-| `luna-xhigh` | `gpt-6-luna` | `xhigh` | `luna-high` |
 | `luna-max` | `gpt-6-luna` | `max` | — |
-| `sol-medium` | `gpt-6-sol` | `medium` | — |
-| `sol-high` | `gpt-6-sol` | `high` | `sol-medium` |
-| `sol-xhigh` | `gpt-6-sol` | `xhigh` | `sol-high` |
+| `sol-medium` | `gpt-6.1-sol` | `medium` | — |
+| `sol-high` | `gpt-6.1-sol` | `high` | `sol-medium` |
+| `sol-xhigh` | `gpt-6.1-sol` | `xhigh` | `sol-high` |
 
-Codex/ChatGPT offer `high`, `xhigh`, and `max` for GPT-6 Luna, and `medium`,
-`high`, and `xhigh` for GPT-6 Sol. Sol `max` and Luna `medium` are not valid
-combinations on Codex/ChatGPT.
+These are the only built-in Codex/ChatGPT execution candidates for this
+workflow. Other host-supported model/effort combinations are intentionally not
+included.
 
 The fallback column applies to planned, profiled workers; it is an
 orchestrator-only exception, not a second planning recommendation. It permits
@@ -77,13 +75,11 @@ Do not infer a capability ranking or automatic fallback between Grok versions.
 
 ## Planning profiles
 
-For Codex/ChatGPT, use `luna-high`, `sol-medium`, or `sol-high` according to
-the model-family and effort guidance in `../SKILL.md`. For Claude Code, use a
-Sonnet profile when material decisions are resolved and an Opus profile when
-residual judgment or deeper implementation reasoning remains. For Cursor,
-choose a host-configured built-in profile or a parent-supplied candidate
-validated for this invocation. Treat `xhigh` profiles as exceptions and apply
-the gates in `../SKILL.md` before selecting one.
-
-Select `luna-max` only on Codex/ChatGPT and only when the separate Luna gates
-in `../SKILL.md` are all met.
+For Codex/ChatGPT, use `sol-medium`, `sol-high`, or `sol-xhigh` according to
+the effort guidance in `../SKILL.md`. Select `luna-max` only when its separate
+gates in `../SKILL.md` are all met. For Claude Code, use a Sonnet profile when
+material decisions are resolved and an Opus profile when residual judgment or
+deeper implementation reasoning remains. For Cursor, choose a host-configured
+built-in profile or a parent-supplied candidate validated for this invocation.
+Treat `xhigh` profiles as exceptions and apply the gates in `../SKILL.md`
+before selecting one.

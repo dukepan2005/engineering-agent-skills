@@ -195,19 +195,13 @@ evaluate candidates. For a model family not covered by that guidance, rely on
 its current official documentation and benchmark evidence without inferring a
 ranking from the family name.
 
-For the built-in Codex/ChatGPT candidates, use these regular profiles:
-
-- `luna-high`: decisions are resolved and focused verification can catch a
-  wrong implementation; Codex/ChatGPT do not offer a lower Luna effort;
-- `sol-medium`: material residual judgment remains, but the decision is bounded
-  and no deep implementation hazard is present;
-- `sol-high`: residual judgment and deep implementation reasoning are both
-  required.
-
-Treat `luna-high` and `sol-medium` as the two primary Codex/ChatGPT profiles
-for agent-ready work items. Use `sol-high` when residual judgment and deep
-implementation reasoning both remain. Neither primary profile is an automatic
-fallback for the other.
+For built-in Codex/ChatGPT candidates, use `sol-medium` when decisions are
+resolved or residual judgment is bounded and verification is strong,
+`sol-high` when material reasoning hazards remain, and `sol-xhigh` only when
+the `xhigh` gates below are met.
+`luna-max` is an exceptional candidate governed by its separate qualification
+gates. The registry defines the exact allowed built-in candidates for this
+workflow.
 
 For built-in Claude Code candidates, prefer a Sonnet profile when material
 decisions are resolved; use Opus when source-backed residual judgment or a
@@ -240,17 +234,16 @@ below is evidenced:
    edge-case handling or exhaustive deterministic test construction.
 
 Do not choose `luna-max` merely for cost, ticket size, or multiple files. If a
-gate is missing, choose `luna-high`, `sol-medium`, or `sol-high` according to
+gate is missing, choose `sol-medium`, `sol-high`, or `sol-xhigh` according to
 the evidence. This profile exists only for Codex/ChatGPT; on another host,
 select from that host's registry without substituting a different model for it.
 
 ### Choose the Model Family
 
-For built-in Codex/ChatGPT choices, choose Luna when the specification has already fixed the
-intended behavior, ownership, contracts, and rollout semantics, and focused
-verification makes an incorrect implementation cheap to detect. This remains
-true when mechanical or independently verifiable edits span multiple modules
-or repositories.
+For built-in Codex/ChatGPT choices, use the Sol profiles for regular work.
+Select Luna only through the qualified `luna-max` gates above; resolved
+decisions or easy verification alone do not qualify. This remains true when
+independently verifiable edits span multiple modules or repositories.
 
 For built-in Claude Code choices, choose Sonnet when the specification resolves
 material decisions; choose Opus when source-backed residual judgment remains, such as:
@@ -273,22 +266,22 @@ model-family trigger by itself.
 
 ### Choose Reasoning Effort
 
-For built-in Codex/ChatGPT choices, use `medium` only with Sol. Select
-`sol-medium` when residual judgment is bounded, feedback is strong, and no
-material non-local invariant must remain correct across many steps. For
-built-in Claude Code choices, use the Sonnet or Opus effort listed in the
-registry. Built-in Cursor Grok profiles support `high` or `xhigh`; Composer 2.5
-has no reasoning-effort setting. For an additional candidate, use only the
-effort passed by the parent after host validation.
+For built-in Codex/ChatGPT choices, select `sol-medium` when decisions are
+resolved or remaining judgment is bounded, feedback is strong, and no material
+non-local invariant must remain correct across many steps. For built-in Claude
+Code choices, use the Sonnet or Opus effort listed in the registry. Built-in
+Cursor Grok profiles support `high` or `xhigh`; Composer 2.5 has no
+reasoning-effort setting. For an additional candidate, use only the effort
+passed by the parent after host validation.
 
 Use `high` when one material reasoning hazard or several interdependent
 implementation decisions remain, including concurrency, ordering, lifecycle,
 retry/idempotency, a coordinated migration or compatibility transition,
 non-local invariants, or repeated hypothesis-and-test loops. Select
-`luna-high` when these hazards remain but the specification has resolved
-material judgment; select `sol-high` when deeper implementation reasoning
-combines with a Sol judgment gate. Apply the equivalent host-specific model and
-effort profiles from the registry on Claude Code and Cursor.
+`sol-high` when such a hazard exceeds the bounded `sol-medium` profile, even if
+the specification has already resolved the product decisions. Apply the
+equivalent host-specific model and effort profiles from the registry on Claude
+Code and Cursor.
 
 Use `xhigh` only when all of these gates are evidenced:
 
@@ -301,12 +294,10 @@ Use `xhigh` only when all of these gates are evidenced:
 3. Verification is weak or rollback is difficult, or representative evaluations
    of this work-item class show a material benefit over `high`.
 
-Otherwise cap the initial effort at `high`. Treat `sol-high` as a compounded
-case, not the default Sol profile, and treat host-supported `xhigh` profiles as
-exceptional. Do not invent profiles. `luna-max` is the only built-in `max`
-profile for
-Codex/ChatGPT and requires every qualified-Luna gate above; Sol does not offer
-`max` on those hosts.
+Otherwise cap the initial effort at `high`. Treat `sol-high` as a hazard-driven
+choice and `sol-xhigh` as exceptional. Do not invent profiles. `luna-max` is
+the only built-in `max` profile for Codex/ChatGPT and requires every
+qualified-Luna gate above; this workflow does not include a Sol `max` candidate.
 
 ## Explain Every Recommendation
 
