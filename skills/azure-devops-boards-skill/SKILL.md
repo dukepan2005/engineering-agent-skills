@@ -66,6 +66,11 @@ known. Bug field files are stored verbatim as Markdown and use each field's
 `multilineFieldsFormat=markdown` metadata. Do not render them to HTML or limit
 Azure's supported Markdown syntax.
 
+For Task and Bug work items, keep Acceptance Criteria in the separate native
+`Microsoft.VSTS.Common.AcceptanceCriteria` field via
+`--acceptance-criteria-file`. Keep `System.Description` for descriptive
+context; do not put Acceptance Criteria in Description.
+
 Before resolving, inspecting, selecting, or testing anything, read that command
 reference. There is no separate capability-discovery step.
 

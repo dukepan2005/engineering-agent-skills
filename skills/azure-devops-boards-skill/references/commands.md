@@ -22,12 +22,19 @@ Read the repository's tracker instructions before operating. Treat its work-item
 - Read the relevant work item before changing it.
 - Do not search for duplicate work items before creating one. Create directly — the caller knows what it intends to create, and pre-creation duplicate queries cost more than the occasional duplicate they would prevent. Only search for existing items when the user explicitly asks to check.
 - Prepare long descriptions and comments in temporary Markdown files.
-- When closeout needs acceptance-criteria synchronization, read the full
-  Description, preserve all non-checklist content, mark only checklist items
-  backed by explicit implementation evidence, and pass the result with
-  `close-task --description-file`. Post the completion comment in the same
-  closeout call. `--check-ac` is an opt-in server-side alternative and is
-  mutually exclusive with `--description-file`.
+- Keep Task/Bug Acceptance Criteria in the native
+  `Microsoft.VSTS.Common.AcceptanceCriteria` field via
+  `--acceptance-criteria-file`; keep `System.Description` for descriptive
+  context and never put Acceptance Criteria there.
+- At closeout, synchronize only evidence-backed checklist items in the native
+  Acceptance Criteria field, preserve Description, and post the completion
+  comment in the same call. `--check-ac` is an opt-in server-side alternative
+  to `--acceptance-criteria-file`; either can be combined with
+  `--description-file`, but they cannot be combined with each other.
+- When closeout replaces Description or Acceptance Criteria from a file, pass
+  `--expected-rev` from the work-item revision used to prepare that file. The
+  helper rejects file-based closeout without it; `--check-ac` can use its live
+  read revision.
 - Run a mutation once with `--apply` by default — the helper validates server-side, applies, and read-back-checks the persisted result in a single call. Use the opt-in two-phase form (the identical command without `--apply`, reviewed, then repeated with `--apply`) only for high-risk changes or when a human should review before the write.
 - A stale `/rev` — the item changed since it was read — fails the mutation immediately, with no automatic retry. Re-read and reconcile before retrying.
 - `az boards work-item update --discussion` is off-limits: it posts plain text, not a native relation. Express dependencies with `add-link` instead.
@@ -44,12 +51,14 @@ sh "$HELPER" implement-preflight --id 61
 
 sh "$HELPER" create \
   --type Task --title 'Implement contract' \
-  --description-file /tmp/task.md --parent 61 \
+  --description-file /tmp/task-description.md \
+  --acceptance-criteria-file /tmp/task-ac.md --parent 61 \
   --tags ready-for-agent
 
 sh "$HELPER" create \
   --type Bug --title 'Crash during planning' \
-  --description-file /tmp/bug.md \
+  --description-file /tmp/bug-description.md \
+  --acceptance-criteria-file /tmp/bug-ac.md \
   --repro-steps-file /tmp/repro-steps.md \
   --system-info-file /tmp/system-info.md
 
@@ -103,13 +112,15 @@ and preserves the supplied order without inventing a parent. The single JSON
 result includes the Story or explicit targets and
 each selected target's full fields, multiline formats, raw and normalized
 relations, attachment relations, linked references, complete comments/discussion,
-and a scope summary. An empty Description falls back to type-specific fields, which is
-required for Bugs that record repro data outside `System.Description`, such as
-`Microsoft.VSTS.TCM.ReproSteps`, `Microsoft.VSTS.TCM.SystemInfo`, and (when
-present) `Microsoft.VSTS.TCM.FoundInBuild` or acceptance/severity fields. If
-those fields are empty, the complete Discussion comments remain authoritative
-context; ticket creation must not hide that context behind a comment-only
-summary.
+and a scope summary. For Task/Bug targets, the summary reads
+`Microsoft.VSTS.Common.AcceptanceCriteria` as a separate native field and keeps
+Description alongside it. If the native Acceptance Criteria field is empty,
+scope can fall back to Description and type-specific fields. Bug-specific
+fields include `Microsoft.VSTS.TCM.ReproSteps`,
+`Microsoft.VSTS.TCM.SystemInfo`, and (when present)
+`Microsoft.VSTS.TCM.FoundInBuild` or severity fields. If those fields are
+empty, the complete Discussion comments remain authoritative context; ticket
+creation must not hide that context behind a comment-only summary.
 `discussion.comments` is the paginated Work Item Comments API result. It is
 separate from the optional full revision/update history; the latter is not
 needed to determine the current planning scope.

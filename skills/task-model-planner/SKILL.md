@@ -51,12 +51,15 @@ or empty/whitespace-only content for a material specification is `Input not
 ready`; do not infer the specification from an attachment URL or relation
 metadata.
 
-Description is one possible scope authority, not a universal one. For a Bug or
-another item without Description, classify scope and verification from the
-snapshot's type-specific fields (for example Repro Steps/System Info),
-comments/discussion, linked specification, and relations. If the Bug-specific
-fields are empty, Discussion comments may be the actual reproduction evidence;
-do not discard them or mark the snapshot incomplete for that reason.
+For Task and Bug items, `Microsoft.VSTS.Common.AcceptanceCriteria` is the
+separate native Acceptance Criteria field; read it independently from
+`System.Description`. Keep Acceptance Criteria out of Description. Description
+is one possible scope authority, not a universal one. For a Bug or another item
+without Description, classify scope and verification from the snapshot's
+type-specific fields (for example Repro Steps/System Info), comments/discussion,
+linked specification, and relations. If the Bug-specific fields are empty,
+Discussion comments may be the actual reproduction evidence; do not discard
+them or mark the snapshot incomplete for that reason.
 `discussion.comments` is the current paginated Comments API result; it is not
 the complete revision history unless a history/revisions payload was explicitly
 supplied. Do not return `Input not ready` merely because Description or the

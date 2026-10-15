@@ -20,13 +20,14 @@ Mutating commands validate server-side, apply, and verify the persisted read-bac
 
 Updates use Azure DevOps work-item revisions for optimistic concurrency: a stale revision fails the mutation immediately, with no automatic retry. Descriptions and comments are verified as Markdown, and persisted fields or relations are read back before success is reported.
 
-When closeout must synchronize acceptance criteria, the closeout agent reads the
-full Description, marks only checklist items backed by implementation evidence,
-and passes the resulting Markdown through `close-task --description-file`.
-`close-task` persists that Description, the terminal state, and one completion
-comment in the same closeout call. `--check-ac` remains an opt-in server-side
-alternative, but it is mutually exclusive with `--description-file`. The Skill
-does not decide which acceptance criteria have been satisfied.
+Task and Bug Acceptance Criteria belong in the separate native
+`Microsoft.VSTS.Common.AcceptanceCriteria` field; keep them out of Description.
+At closeout, update only checklist items backed by implementation evidence and
+preserve Description. `close-task --acceptance-criteria-file` writes the native
+field, while `--check-ac` checks its Markdown boxes server-side. Either can be
+combined with `--description-file`; the two Acceptance Criteria options are
+mutually exclusive. The Skill does not decide which criteria have been
+satisfied.
 
 The helper uses the locally authenticated Azure CLI SDK. It does not accept, read, or print a personal access token.
 
@@ -104,7 +105,8 @@ and verifies the persisted read-back in that one call:
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" create --apply \
   --type Task \
   --title 'Implement contract' \
-  --description-file /tmp/task.md \
+  --description-file /tmp/task-description.md \
+  --acceptance-criteria-file /tmp/task-ac.md \
   --tags ready-for-agent \
   --parent 61
 
@@ -125,6 +127,8 @@ For a high-risk change, or when a human should review before the write, omit
 Bug Repro Steps and System Info support Markdown. Their `--repro-steps-file`
 and `--system-info-file` inputs are stored verbatim with each field's
 `multilineFieldsFormat=markdown` metadata, on both `create` and `update`.
+Task and Bug Acceptance Criteria use `--acceptance-criteria-file` on `create`
+and `update`, stored in the native field with the same Markdown metadata.
 
 For `predecessor`, the target work item blocks the current work item. For `parent`, the target is the current work item's parent. Re-adding an existing relation returns `unchanged`.
 
@@ -134,19 +138,21 @@ then one closeout command at the end:
 ```bash
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" close-task --apply \
   --id 123 --expected-rev 8 --state Closed \
-  --description-file /tmp/description.md --comment-file /tmp/completion.md
+  --acceptance-criteria-file /tmp/acceptance-criteria.md \
+  --comment-file /tmp/completion.md
 ```
 
-`close-task` can update the Description and terminal state, then post one
-Markdown completion comment in a single call. The caller must preserve all
-non-checklist Description content and mark only evidence-backed criteria.
-(`--check-ac all|FRAGMENT` remains an opt-in server-side alternative, but is
-mutually exclusive with `--description-file`.) `implement-preflight` retains
-structured acceptance criteria, or falls back to the complete Description when
-it cannot safely identify them. The close call verifies both persisted results.
-The two Azure operations remain separately verified rather than being presented
-as an atomic transaction. A stale revision fails the mutation immediately, with
-no automatic retry.
+`close-task` can update native Acceptance Criteria, Description, and terminal
+state, then post one Markdown completion comment in a single call. The caller
+must preserve Description and mark only evidence-backed criteria in the native
+field. `--check-ac all|FRAGMENT` is an opt-in alternative to
+`--acceptance-criteria-file`; either can be combined with `--description-file`.
+`implement-preflight` returns the native Acceptance Criteria field separately
+from Description. The close call verifies the persisted fields. The two Azure
+operations remain separately verified rather than being presented as an atomic
+transaction. A stale revision fails the mutation immediately, with no automatic
+retry. File-based `close-task` updates require `--expected-rev` from the
+revision used to prepare the file.
 
 ## Workflow integration
 

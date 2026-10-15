@@ -106,11 +106,13 @@ malformed review is never clean and also stops the workflow. Return:
 
 When either review round is clean, close the work item through
 `$azure-devops-boards-skill` in its semantic `task-boards-ops` role. Map every
-Acceptance criterion to concrete current-code evidence; update only checklist
-markers supported by that mapping, preserve the rest of the Description, post a
+Acceptance criterion to concrete current-code evidence. For Task/Bug items,
+update only supported checklist markers in the native
+`Microsoft.VSTS.Common.AcceptanceCriteria` field, preserve Description, post a
 completion comment, and close to the repository's documented terminal state
-(normally `Closed`). Use `close-task --apply` with the preflight revision as
-`--expected-rev`; if it is stale, stop without retrying or claiming completion.
+(normally `Closed`). When criteria need updating, pass the revised field through
+`close-task --acceptance-criteria-file`; use the preflight revision as
+`--expected-rev`. If it is stale, stop without retrying or claiming completion.
 Return `{"outcome":"completed", ...}` with both commit IDs when repair was
 needed, verification, review summary, final tracker state, and closeout result.
 If closeout cannot be performed after a clean review, stop and report the

@@ -200,10 +200,13 @@ class SkillDependencyContractTests(unittest.TestCase):
     def test_closeout_rewrites_evidence_backed_checklists_and_posts_comment(self) -> None:
         text = self.read_skill("azure-task-orchestrator")
 
-        self.assertIn("Read the current full Description", text)
+        self.assertIn("Read Acceptance Criteria from", text)
+        self.assertIn("`Microsoft.VSTS.Common.AcceptanceCriteria`", text)
+        self.assertIn("Acceptance Criteria and Description", text)
         self.assertIn("current-code evidence", text)
         self.assertIn("explicit current-code implementation evidence", text)
-        self.assertIn("--description-file <tmpdescription>", text)
+        self.assertIn("--acceptance-criteria-file <tmpacceptancecriteria>", text)
+        self.assertIn("Preserve Description unchanged", text)
         self.assertRegex(text, r"--comment-file\s+<tmpcomment>")
         self.assertNotIn("never pass `--check-ac` or `--description-file`", text)
 

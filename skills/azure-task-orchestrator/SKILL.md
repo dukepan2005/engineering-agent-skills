@@ -265,7 +265,7 @@ child directly; no child may start another child.
 | Review round 1 | two parallel read-only children | Standards axis and Spec axis |
 | Repair | one same-candidate child, only when round 1 has findings | rerun verification and create a separate repair commit |
 | Review round 2 | two parallel read-only children, only after repair | verify the repaired delta |
-| Closeout | one cheap Boards child | evidence-backed Description update and close |
+| Closeout | one cheap Boards child | evidence-backed Acceptance Criteria update and close |
 
 Use [references/flat-review-worker.md](references/flat-review-worker.md) as the
 worker contract for both review axes. The parent may validate and aggregate
@@ -423,24 +423,26 @@ Closeout policy (apply before spawning):
   test seam when the AC asks for one. That mapping is the only explicit current-code implementation evidence
   that may check an item. An implementation summary, commit title, PR merge,
   or “tests passed” claim is not enough.
-- Read the current full Description and preserve its non-checklist content and
-  formatting. Mark an unchecked Markdown checklist item as checked only when
-  that code mapping exists and matches the criterion text. Do not infer
+- Read the current full work item and read Task/Bug Acceptance Criteria from
+  `Microsoft.VSTS.Common.AcceptanceCriteria`, separately from
+  `System.Description`. Preserve Description unchanged. Mark an unchecked
+  Markdown checklist item only in the native Acceptance Criteria field and only
+  when that code mapping exists and matches the criterion text. Do not infer
   evidence from the item's final state, commit title, or a general success
   claim.
 - If an unchecked checklist item lacks code evidence, or its text cannot
   be mapped unambiguously to a concrete implementation, stop without
-  closing the item. Do not overwrite the Description or post a completion
-  comment.
-- Write the resulting Description to a temporary Markdown file and write a
+  closing the item. Do not overwrite Description or post a completion comment.
+- Write the resulting Acceptance Criteria to a temporary Markdown file and write a
   completion comment from the code-vs-AC mapping to another temporary
   Markdown file.
 - Close the work item to `Closed`: pass `--state Closed`. If repository guidance
   names a different terminal state for a non-Task type, use that stated value.
-- Pass the rewritten Description with `--description-file`; do not combine it
-  with `--check-ac` because those options are mutually exclusive.
+- Pass the revised native field with `--acceptance-criteria-file`; preserve
+  `System.Description`. Do not also pass `--check-ac`, which is mutually
+  exclusive with `--acceptance-criteria-file`.
 - Always pass `--expected-rev` (the preflight revision from step 1). It binds
-  the Description read and final mutation to the same work-item version; a
+  the field read and final mutation to the same work-item version; a
   stale revision stops the closeout.
 
 Give the agent the work-item ID, the preflight revision from step 1, the
@@ -448,14 +450,16 @@ code-vs-AC mapping, and this self-contained instruction:
 
 ```text
 Use `$azure-devops-boards-skill` in its semantic `task-boards-ops` role. Read
-the current full Description with `show --organization <organization> --project
-<project> --full --id <id>`. Apply only the evidence-backed Markdown checklist
-changes specified by the parent code-vs-AC mapping, preserving all other
-Description content. Write the rewritten Description to `<tmpdescription>` and
-a Markdown completion comment to `<tmpcomment>`. Then run `close-task --apply
+the current full work item with `show --organization <organization> --project
+<project> --full --id <id>`. Read Acceptance Criteria from
+`Microsoft.VSTS.Common.AcceptanceCriteria`, separate from Description. Apply
+only evidence-backed Markdown checklist changes specified by the parent
+code-vs-AC mapping, preserving all other Acceptance Criteria and Description
+content. Write the resulting Acceptance Criteria to `<tmpacceptancecriteria>`
+and a Markdown completion comment to `<tmpcomment>`. Then run `close-task --apply
 --organization <organization> --project <project> --id <id> --expected-rev
-<rev> --state Closed --description-file <tmpdescription> --comment-file
-<tmpcomment>`.
+<rev> --state Closed --acceptance-criteria-file <tmpacceptancecriteria>
+--comment-file <tmpcomment>`.
 Return the JSON output unchanged. Do not use `--check-ac`, and do not perform
 any non-Boards work.
 ```

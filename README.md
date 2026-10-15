@@ -109,9 +109,9 @@ work item the parent controls a flat sequence:
    commit and reviews the full task delta once more. Two dual-axis rounds
    maximum; remaining findings stop the run for human direction. A clean first
    or second round proceeds to closeout.
-5. **Closeout** (cheap model, low reasoning) — checks evidence-backed
-   Description checklist items, posts the completion comment, and closes the
-   work item with optimistic revision checking.
+5. **Closeout** (cheap model, low reasoning) — checks evidence-backed native
+   Acceptance Criteria, preserves Description, posts the completion comment,
+   and closes the work item with optimistic revision checking.
 
 Use `$azure-task-implement` whenever a specification or ticket scope is already
 available and only local implementation work is required. In the flat Azure

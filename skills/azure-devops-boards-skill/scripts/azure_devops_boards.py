@@ -14,6 +14,7 @@ RELATIONS = {"parent": "System.LinkTypes.Hierarchy-Reverse", "predecessor": "Sys
 PLANNING_TYPES = ("Task", "Bug")
 PLANNING_PARENT_TYPES = ("Story", "User Story")
 PLANNING_STATE = "New"
+ACCEPTANCE_CRITERIA_FIELD = "Microsoft.VSTS.Common.AcceptanceCriteria"
 _BUG_SCOPE_FIELDS = frozenset({
     "Microsoft.VSTS.TCM.ReproSteps",
     "Microsoft.VSTS.TCM.SystemInfo",
@@ -64,7 +65,7 @@ def op(cls, verb, path, value): return cls(op=verb, path=path, value=value)
 def emit(value): print(json.dumps(value, ensure_ascii=False, indent=2, default=str))
 
 
-def _read_bug_markdown(value_file, field_name):
+def _read_markdown_field(value_file, field_name):
     markdown = value_file.read_text()
     if not markdown.strip():
         raise RuntimeError(f"{field_name} must not be empty.")
@@ -219,21 +220,14 @@ def _relation_summary(item):
 
 
 def _scope_summary(fields):
-    """Keep structured acceptance criteria; otherwise retain authority text."""
+    """Keep native acceptance criteria separate from Description authority."""
     text = html.unescape(fields.get("System.Description", "") or "")
-    lines = text.splitlines()
-    checklist = [line.strip() for line in lines if line.lstrip().startswith(("- [ ]", "- [x]", "- [X]"))]
-    if checklist:
-        return {"source": "markdown-checklist", "acceptanceCriteria": checklist}
-    heading = next((index for index, line in enumerate(lines)
-                    if line.strip().lower().lstrip("#").strip() in {"acceptance criteria", "acceptance", "验收标准"}), None)
-    if heading is not None:
-        body = []
-        for line in lines[heading + 1:]:
-            if line.startswith("#"):
-                break
-            body.append(line)
-        return {"source": "acceptance-heading", "acceptanceCriteria": "\n".join(body).strip()}
+    acceptance_criteria = html.unescape(fields.get(ACCEPTANCE_CRITERIA_FIELD, "") or "")
+    if acceptance_criteria.strip():
+        result = {"source": "acceptance-criteria-field", "acceptanceCriteria": acceptance_criteria}
+        if text.strip():
+            result["description"] = text
+        return result
     if text.strip():
         return {"source": "description-fallback", "description": text}
     retained = {
@@ -419,19 +413,28 @@ def create(args):
     expected_fields = {"System.IterationPath": iteration}; expected_formats = {}
     repro_steps_file = getattr(args, "repro_steps_file", None)
     system_info_file = getattr(args, "system_info_file", None)
+    acceptance_criteria_file = getattr(args, "acceptance_criteria_file", None)
     comment_file = getattr(args, "comment_file", None)
     initial_comment = comment_file.read_text() if comment_file is not None else None
     if initial_comment is not None and not initial_comment.strip():
         raise RuntimeError("Comment must not be empty.")
     if args.type != "Bug" and any(value is not None for value in (repro_steps_file, system_info_file)):
         raise RuntimeError("Bug-specific fields require --type Bug.")
+    if acceptance_criteria_file is not None:
+        if args.type not in PLANNING_TYPES:
+            raise RuntimeError("Acceptance Criteria requires --type Task or Bug.")
+        value = _read_markdown_field(acceptance_criteria_file, ACCEPTANCE_CRITERIA_FIELD)
+        document.append(op(cls, "add", f"/fields/{ACCEPTANCE_CRITERIA_FIELD}", value))
+        document.append(op(cls, "add", f"/multilineFieldsFormat/{ACCEPTANCE_CRITERIA_FIELD}", "markdown"))
+        expected_fields[ACCEPTANCE_CRITERIA_FIELD] = value
+        expected_formats[ACCEPTANCE_CRITERIA_FIELD] = "markdown"
     for option, field_name in (
         ("repro_steps_file", "Microsoft.VSTS.TCM.ReproSteps"),
         ("system_info_file", "Microsoft.VSTS.TCM.SystemInfo"),
     ):
         value_file = locals()[option]
         if value_file is not None:
-            value = _read_bug_markdown(value_file, field_name)
+            value = _read_markdown_field(value_file, field_name)
             document.append(op(cls, "add", f"/fields/{field_name}", value))
             document.append(op(cls, "add", f"/multilineFieldsFormat/{field_name}", "markdown"))
             expected_fields[field_name] = value
@@ -474,11 +477,21 @@ def update(args):
             raise RuntimeError("Bug-specific fields require a Bug work item.")
         for value_file, field_name in bug_files:
             if value_file is not None:
-                value = _read_bug_markdown(value_file, field_name)
+                value = _read_markdown_field(value_file, field_name)
                 document.append(op(cls, "add", f"/fields/{field_name}", value))
                 document.append(op(cls, "add", f"/multilineFieldsFormat/{field_name}", "markdown"))
                 expected[field_name] = value
                 expected_formats[field_name] = "markdown"
+    acceptance_criteria_file = getattr(args, "acceptance_criteria_file", None)
+    if acceptance_criteria_file is not None:
+        item_type = before.get("fields", {}).get("System.WorkItemType")
+        if item_type not in PLANNING_TYPES:
+            raise RuntimeError("Acceptance Criteria requires a Task or Bug work item.")
+        value = _read_markdown_field(acceptance_criteria_file, ACCEPTANCE_CRITERIA_FIELD)
+        document.append(op(cls, "add", f"/fields/{ACCEPTANCE_CRITERIA_FIELD}", value))
+        document.append(op(cls, "add", f"/multilineFieldsFormat/{ACCEPTANCE_CRITERIA_FIELD}", "markdown"))
+        expected[ACCEPTANCE_CRITERIA_FIELD] = value
+        expected_formats[ACCEPTANCE_CRITERIA_FIELD] = "markdown"
     if getattr(args, "tags", None):
         existing = before.get("fields", {}).get("System.Tags", "") or ""
         merged = [t.strip() for t in existing.split(";") if t.strip()]
@@ -519,8 +532,8 @@ def _checklist_marker(body):
     return None, False
 
 
-def _check_checkboxes(description, selector):
-    """Return ``description`` with matching markdown checklist lines marked checked.
+def _check_checkboxes(criteria, selector):
+    """Return acceptance criteria with matching checklist lines checked.
 
     ``selector.casefold() == "all"`` matches every checklist line; otherwise
     exactly one line whose item text (case-insensitive) contains ``selector``
@@ -529,7 +542,7 @@ def _check_checkboxes(description, selector):
     """
     is_all = selector.casefold() == "all"
     matches, rendered = [], []
-    for line in description.splitlines(keepends=True):
+    for line in criteria.splitlines(keepends=True):
         body, indent = line.lstrip(), line[:len(line) - len(line.lstrip())]
         marker, checked = _checklist_marker(body)
         if marker is None:
@@ -550,42 +563,54 @@ def _check_checkboxes(description, selector):
 def close_task(args):
     """Persist one final work-item patch and one Markdown completion comment.
 
-    ``--check-ac`` checks acceptance-criteria checkboxes server-side (the current
-    Description is read, matching unchecked lines are checked, and the full
-    Description is patched back), so marking an item done no longer requires a
-    separate fetch, local edit, and whole-Description rewrite. The preflight
-    revision avoids a redundant pre-write read.
+    ``--check-ac`` checks the native Acceptance Criteria field; it never edits
+    Description. The preflight revision avoids a redundant pre-write read.
     """
+    acceptance_criteria_file = getattr(args, "acceptance_criteria_file", None)
+    if args.expected_rev is None and (args.description_file is not None or acceptance_criteria_file is not None):
+        raise RuntimeError("File-based closeout requires --expected-rev from the source work item.")
     client, cls = connect(args)
     comment = args.comment_file.read_text()
     if not comment.strip(): raise RuntimeError("Comment must not be empty.")
-    fields, text, read_rev = {}, None, None
-    if args.check_ac is not None:
+    fields, multiline_formats, description, read_rev = {}, {}, None, None
+    if args.check_ac is not None or acceptance_criteria_file is not None:
         item = client.read(args.id)
         read_rev = item["rev"]
-        stored = item.get("fields", {}).get("System.Description", "")
-        text = _check_checkboxes(html.unescape(stored), args.check_ac)
-    elif args.description_file is not None:
-        text = args.description_file.read_text()
+        item_type = item.get("fields", {}).get("System.WorkItemType")
+        if item_type not in PLANNING_TYPES:
+            raise RuntimeError("Acceptance Criteria requires a Task or Bug work item.")
+    if args.check_ac is not None:
+        stored = item.get("fields", {}).get(ACCEPTANCE_CRITERIA_FIELD, "")
+        fields[ACCEPTANCE_CRITERIA_FIELD] = _check_checkboxes(html.unescape(stored or ""), args.check_ac)
+        multiline_formats[ACCEPTANCE_CRITERIA_FIELD] = "markdown"
+    elif acceptance_criteria_file is not None:
+        fields[ACCEPTANCE_CRITERIA_FIELD] = _read_markdown_field(
+            acceptance_criteria_file, ACCEPTANCE_CRITERIA_FIELD,
+        )
+        multiline_formats[ACCEPTANCE_CRITERIA_FIELD] = "markdown"
+    if args.description_file is not None:
+        description = args.description_file.read_text()
     if args.state is not None: fields["System.State"] = args.state
-    has_patch = text is not None or bool(fields)
+    has_patch = description is not None or bool(fields)
     expected = args.expected_rev
     if expected is None and has_patch:
         expected = read_rev if read_rev is not None else client.read(args.id)["rev"]
     if not args.apply:
         if has_patch:
             document = [op(cls, "test", "/rev", expected)]
-            if text is not None: document += [op(cls, "add", "/fields/System.Description", text), op(cls, "add", "/multilineFieldsFormat/System.Description", "markdown")]
+            if description is not None: document += [op(cls, "add", "/fields/System.Description", description), op(cls, "add", "/multilineFieldsFormat/System.Description", "markdown")]
             for field, value in fields.items(): document.append(op(cls, "add", f"/fields/{field}", value))
-            safe_mutate(client=client, target=ExistingItem(args.id), document=document, expectation=Expectation(fields=fields, description=text), apply=False)
+            for field, value in multiline_formats.items(): document.append(op(cls, "add", f"/multilineFieldsFormat/{field}", value))
+            safe_mutate(client=client, target=ExistingItem(args.id), document=document, expectation=Expectation(fields=fields, multiline_formats=multiline_formats, description=description), apply=False)
         emit({"mode": "validated", "id": args.id, "fields": fields, "comment": {"format": "markdown", "length": len(comment)}})
         return
     mutation = None
     if has_patch:
         document = [op(cls, "test", "/rev", expected)]
-        if text is not None: document += [op(cls, "add", "/fields/System.Description", text), op(cls, "add", "/multilineFieldsFormat/System.Description", "markdown")]
+        if description is not None: document += [op(cls, "add", "/fields/System.Description", description), op(cls, "add", "/multilineFieldsFormat/System.Description", "markdown")]
         for field, value in fields.items(): document.append(op(cls, "add", f"/fields/{field}", value))
-        mutation = safe_mutate(client=client, target=ExistingItem(args.id), document=document, expectation=Expectation(fields=fields, description=text), apply=True)
+        for field, value in multiline_formats.items(): document.append(op(cls, "add", f"/multilineFieldsFormat/{field}", value))
+        mutation = safe_mutate(client=client, target=ExistingItem(args.id), document=document, expectation=Expectation(fields=fields, multiline_formats=multiline_formats, description=description), apply=True)
     saved = client.add_comment(args.id, comment)
     if saved is None or saved.get("format", "").lower() != "markdown" or html.unescape(saved.get("text", "")) != comment:
         raise RuntimeError("Markdown comment did not persist.")
@@ -604,12 +629,12 @@ def parser():
     show = commands.add_parser("show"); connection(show); show.add_argument("--id", type=int, required=True); show.add_argument("--full", action="store_true", help="emit the full Azure JSON"); show.set_defaults(run=show_item)
     snapshot = commands.add_parser("planning-snapshot"); connection(snapshot); snapshot_ids = snapshot.add_mutually_exclusive_group(required=True); snapshot_ids.add_argument("--story", type=int); snapshot_ids.add_argument("--id", dest="item_ids", action="append", type=int, metavar="ID"); snapshot.set_defaults(run=planning_snapshot)
     preflight_p = commands.add_parser("implement-preflight"); connection(preflight_p); preflight_p.add_argument("--id", type=int, required=True); preflight_p.set_defaults(run=preflight)
-    create_p = commands.add_parser("create"); connection(create_p, True); create_p.add_argument("--apply", action="store_true"); create_p.add_argument("--type", choices=("Epic", "Feature", "User Story", "Task", "Bug"), required=True); create_p.add_argument("--title", required=True); create_p.add_argument("--description-file", type=Path, required=True); create_p.add_argument("--repro-steps-file", type=Path, help="Bug-only Markdown rendered as HTML for Microsoft.VSTS.TCM.ReproSteps"); create_p.add_argument("--system-info-file", type=Path, help="Bug-only Markdown rendered as HTML for Microsoft.VSTS.TCM.SystemInfo"); create_p.add_argument("--comment-file", type=Path, help="Optional initial Markdown comment; for a Bug without --repro-steps-file it becomes HTML Repro Steps"); create_p.add_argument("--iteration"); create_p.add_argument("--tags", action="append", default=[])
+    create_p = commands.add_parser("create"); connection(create_p, True); create_p.add_argument("--apply", action="store_true"); create_p.add_argument("--type", choices=("Epic", "Feature", "User Story", "Task", "Bug"), required=True); create_p.add_argument("--title", required=True); create_p.add_argument("--description-file", type=Path, required=True); create_p.add_argument("--acceptance-criteria-file", type=Path, help="Task- or Bug-only Markdown for Microsoft.VSTS.Common.AcceptanceCriteria"); create_p.add_argument("--repro-steps-file", type=Path, help="Bug-only Markdown rendered as HTML for Microsoft.VSTS.TCM.ReproSteps"); create_p.add_argument("--system-info-file", type=Path, help="Bug-only Markdown rendered as HTML for Microsoft.VSTS.TCM.SystemInfo"); create_p.add_argument("--comment-file", type=Path, help="Optional initial Markdown comment; for a Bug without --repro-steps-file it becomes HTML Repro Steps"); create_p.add_argument("--iteration"); create_p.add_argument("--tags", action="append", default=[])
     for kind in RELATIONS: create_p.add_argument(f"--{kind}", action="append", type=int, default=[])
     create_p.set_defaults(run=create)
-    update_p = commands.add_parser("update"); connection(update_p); update_p.add_argument("--apply", action="store_true"); update_p.add_argument("--id", type=int, required=True); update_p.add_argument("--description-file", type=Path); update_p.add_argument("--repro-steps-file", type=Path, help="Bug-only Markdown rendered as HTML Repro Steps"); update_p.add_argument("--system-info-file", type=Path, help="Bug-only Markdown rendered as HTML System Info"); update_p.add_argument("--state"); update_p.add_argument("--iteration"); update_p.add_argument("--tags", action="append", default=[]); update_p.set_defaults(run=update)
+    update_p = commands.add_parser("update"); connection(update_p); update_p.add_argument("--apply", action="store_true"); update_p.add_argument("--id", type=int, required=True); update_p.add_argument("--description-file", type=Path); update_p.add_argument("--acceptance-criteria-file", type=Path, help="Task- or Bug-only Markdown for Microsoft.VSTS.Common.AcceptanceCriteria"); update_p.add_argument("--repro-steps-file", type=Path, help="Bug-only Markdown rendered as HTML Repro Steps"); update_p.add_argument("--system-info-file", type=Path, help="Bug-only Markdown rendered as HTML System Info"); update_p.add_argument("--state"); update_p.add_argument("--iteration"); update_p.add_argument("--tags", action="append", default=[]); update_p.set_defaults(run=update)
     comment = commands.add_parser("add-comment"); connection(comment); comment.add_argument("--apply", action="store_true"); comment.add_argument("--id", type=int, required=True); comment.add_argument("--comment-file", type=Path, required=True); comment.set_defaults(run=add_comment)
-    close = commands.add_parser("close-task"); connection(close); close.add_argument("--apply", action="store_true"); close.add_argument("--id", type=int, required=True); close.add_argument("--expected-rev", type=int); close.add_argument("--state"); close.add_argument("--comment-file", type=Path, required=True); close_body = close.add_mutually_exclusive_group(); close_body.add_argument("--description-file", type=Path); close_body.add_argument("--check-ac", metavar="all|FRAGMENT"); close.set_defaults(run=close_task)
+    close = commands.add_parser("close-task"); connection(close); close.add_argument("--apply", action="store_true"); close.add_argument("--id", type=int, required=True); close.add_argument("--expected-rev", type=int); close.add_argument("--state"); close.add_argument("--comment-file", type=Path, required=True); close.add_argument("--description-file", type=Path); close_ac = close.add_mutually_exclusive_group(); close_ac.add_argument("--acceptance-criteria-file", type=Path, help="Task- or Bug-only Markdown for Microsoft.VSTS.Common.AcceptanceCriteria"); close_ac.add_argument("--check-ac", metavar="all|FRAGMENT", help="Check matching Markdown boxes in the native Acceptance Criteria field"); close.set_defaults(run=close_task)
     link = commands.add_parser("add-link"); connection(link); link.add_argument("--apply", action="store_true"); link.add_argument("--id", type=int, required=True); link.add_argument("--kind", choices=tuple(RELATIONS), required=True); link.add_argument("--target-id", type=int, required=True); link.set_defaults(run=add_link)
     return root
 
