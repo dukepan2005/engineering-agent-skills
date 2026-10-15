@@ -363,7 +363,11 @@ def _evaluate(item, expectation, phase, *, check_relation=True, check_descriptio
     fields = item.get("fields", {})
     for field, value in expectation.fields.items():
         actual = fields.get(field)
-        if actual != value:
+        matches = actual == value
+        if field == "System.AssignedTo" and isinstance(value, str):
+            identity_name = actual.get("uniqueName") if isinstance(actual, dict) else actual
+            matches = isinstance(identity_name, str) and identity_name.casefold() == value.casefold()
+        if not matches:
             requested = json.dumps(value, ensure_ascii=False)
             returned = json.dumps(actual, ensure_ascii=False)
             raise RuntimeError(
@@ -465,10 +469,16 @@ def create(args):
 
 
 def update(args):
+    assigned_to = getattr(args, "assigned_to", None)
+    if assigned_to is not None:
+        assigned_to = assigned_to.strip()
+        if not assigned_to:
+            raise RuntimeError("AssignedTo must not be empty; use an Azure identity uniqueName.")
     client, cls = connect(args); before = client.read(args.id); document = [op(cls, "test", "/rev", before["rev"])]; expected = {}; expected_formats = {}; text = None
     if args.description_file:
         text = args.description_file.read_text(); document += [op(cls, "add", "/fields/System.Description", text), op(cls, "add", "/multilineFieldsFormat/System.Description", "markdown")]
-    for field, value in (("System.State", args.state), ("System.IterationPath", args.iteration)):
+    for field, value in (("System.State", args.state), ("System.IterationPath", args.iteration),
+                         ("System.AssignedTo", assigned_to)):
         if value is not None: document.append(op(cls, "add", f"/fields/{field}", value)); expected[field] = value
     bug_files = ((getattr(args, "repro_steps_file", None), "Microsoft.VSTS.TCM.ReproSteps"),
                  (getattr(args, "system_info_file", None), "Microsoft.VSTS.TCM.SystemInfo"))
@@ -633,6 +643,7 @@ def parser():
     for kind in RELATIONS: create_p.add_argument(f"--{kind}", action="append", type=int, default=[])
     create_p.set_defaults(run=create)
     update_p = commands.add_parser("update"); connection(update_p); update_p.add_argument("--apply", action="store_true"); update_p.add_argument("--id", type=int, required=True); update_p.add_argument("--description-file", type=Path); update_p.add_argument("--acceptance-criteria-file", type=Path, help="Task- or Bug-only Markdown for Microsoft.VSTS.Common.AcceptanceCriteria"); update_p.add_argument("--repro-steps-file", type=Path, help="Bug-only Markdown rendered as HTML Repro Steps"); update_p.add_argument("--system-info-file", type=Path, help="Bug-only Markdown rendered as HTML System Info"); update_p.add_argument("--state"); update_p.add_argument("--iteration"); update_p.add_argument("--tags", action="append", default=[]); update_p.set_defaults(run=update)
+    update_p.add_argument("--assigned-to", metavar="UNIQUE_NAME", help="Assign by Azure identity uniqueName (usually email); blank values are rejected")
     comment = commands.add_parser("add-comment"); connection(comment); comment.add_argument("--apply", action="store_true"); comment.add_argument("--id", type=int, required=True); comment.add_argument("--comment-file", type=Path, required=True); comment.set_defaults(run=add_comment)
     close = commands.add_parser("close-task"); connection(close); close.add_argument("--apply", action="store_true"); close.add_argument("--id", type=int, required=True); close.add_argument("--expected-rev", type=int); close.add_argument("--state"); close.add_argument("--comment-file", type=Path, required=True); close.add_argument("--description-file", type=Path); close_ac = close.add_mutually_exclusive_group(); close_ac.add_argument("--acceptance-criteria-file", type=Path, help="Task- or Bug-only Markdown for Microsoft.VSTS.Common.AcceptanceCriteria"); close_ac.add_argument("--check-ac", metavar="all|FRAGMENT", help="Check matching Markdown boxes in the native Acceptance Criteria field"); close.set_defaults(run=close_task)
     link = commands.add_parser("add-link"); connection(link); link.add_argument("--apply", action="store_true"); link.add_argument("--id", type=int, required=True); link.add_argument("--kind", choices=tuple(RELATIONS), required=True); link.add_argument("--target-id", type=int, required=True); link.set_defaults(run=add_link)

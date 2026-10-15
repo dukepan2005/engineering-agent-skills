@@ -68,7 +68,10 @@ sh "$HELPER" create \
   --comment-file /tmp/initial-repro.md
 
 sh "$HELPER" update \
-  --id 123 --state Active --description-file /tmp/task.md
+  --id 123 --state Active --description-file /tmp/task-description.md \
+  --acceptance-criteria-file /tmp/task-ac.md
+
+sh "$HELPER" update --id 123 --assigned-to 'person@example.com'
 
 sh "$HELPER" add-comment \
   --id 123 --comment-file /tmp/comment.md
@@ -78,17 +81,27 @@ sh "$HELPER" add-link \
 
 sh "$HELPER" close-task \
   --id 123 --expected-rev 8 --state Closed \
-  --description-file /tmp/description.md --comment-file /tmp/completion.md
+  --acceptance-criteria-file /tmp/task-ac.md \
+  --comment-file /tmp/completion.md
 ```
 
-Add `--apply` after validation. Before using `--description-file`, keep all
-Description content other than the evidence-backed Markdown checklist markers
-unchanged. `--check-ac` reads the live Description, checks matching markdown
-checkboxes (`all`, or a case-insensitive fragment that must uniquely match
-exactly one item — ambiguous fragments raise), and patches it back in the same
-mutation; it is mutually exclusive with `--description-file`. For
+Add `--apply` after validation. `--description-file` updates Description;
+`--acceptance-criteria-file` separately updates the native Acceptance Criteria
+field for Tasks and Bugs. Both may be used in one command. `--check-ac` reads
+that native field, checks matching Markdown checkboxes (`all`, or a
+case-insensitive fragment that must uniquely match exactly one item —
+ambiguous fragments raise), and patches it back in the same mutation. It is
+mutually exclusive with `--acceptance-criteria-file`, not with
+`--description-file`. For
 `predecessor`, `--target-id` blocks the current `--id`. For `parent`, the target
 is the current item's parent. Re-adding an existing relation returns `unchanged`.
+`update --assigned-to UNIQUE_NAME` sets the work-item owner. Use the Azure
+identity's `uniqueName` (normally its email address), available from the
+`System.AssignedTo` field of an existing item or the target user's identity
+record. The helper checks the resolved identity's `uniqueName` case-insensitively
+during validation and persisted read-back. Blank input is rejected; this option
+does not clear an assignment. The existing revision and mutation checks apply.
+
 When creating a Bug, pass reproduction and environment evidence through
 `--repro-steps-file` and `--system-info-file`; do not put those authoritative
 values only in a Discussion comment. If an initial `--comment-file` is supplied
