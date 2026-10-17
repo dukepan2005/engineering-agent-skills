@@ -10,7 +10,7 @@ The helper is `scripts/azure-devops-boards.sh`, invoked through `sh` by **absolu
 
 ## Require configuration
 
-Require an installed, authenticated Azure CLI with the `azure-devops` extension. Pass connection flags explicitly, or set these once per shell session to make them optional on every call:
+Require an installed, authenticated Azure CLI with the `azure-devops` extension. Pass connection flags explicitly, or set these once per shell session to make them optional on commands other than `search`:
 
 - `AZURE_DEVOPS_ORG`, `AZURE_DEVOPS_PROJECT`, `AZURE_DEVOPS_TEAM`
 - `AZURE_CLI_PYTHON` when the launcher cannot locate Azure CLI's Python runtime
@@ -45,6 +45,8 @@ Read the repository's tracker instructions before operating. Treat its work-item
 sh "$HELPER" current-sprint
 sh "$HELPER" show --id 61               # compact default (id/rev/type/state/title/relations)
 sh "$HELPER" show --id 61 --full        # raw Azure JSON
+sh "$HELPER" search --organization "$AZURE_DEVOPS_ORG" --project "$AZURE_DEVOPS_PROJECT" \
+  --title-contains plan --type "User Story" --type Feature --limit 20
 sh "$HELPER" planning-snapshot --story 61 # Story + direct New Task/Bug targets only
 sh "$HELPER" planning-snapshot --id 123 --id 124 # explicit Task/Bug set, stable input order
 sh "$HELPER" implement-preflight --id 61
@@ -124,6 +126,23 @@ real Discussion comment. The Bug-specific flags are rejected for non-Bug work
 items. Use comments for supplemental context. Repro Steps and System Info inputs
 are stored verbatim as Markdown with field-specific `multilineFieldsFormat=markdown`
 metadata. The same two flags are accepted by `update` for an existing Bug.
+
+## Search existing work items safely
+
+`search` is a read-only, project-scoped search command. Use it only when a
+user explicitly asks to search existing work items; it is not a default
+pre-creation duplicate check. It requires
+`--organization`, `--project`, a `--title-contains` keyword, and one or more
+`--type` values from Epic, Feature, User Story, Task, or Bug. It accepts
+`--limit` from 1 to 100 (default 50) and returns only ID, title, type, state,
+and tags. The helper rejects single quotes, double quotes, and control characters
+in the keyword, fixes the project in both the query and request route, and never
+accepts arbitrary WIQL. It selects `[System.Id]` in WIQL and passes the bounded
+result count through the REST `$top` parameter. This caps the returned result
+count; the substring `CONTAINS` query can still scan titles within the project.
+`possiblyTruncated: true` means more matches may exist, so the caller must not
+infer that no duplicate exists from a truncated list. If the summary batch omits
+any requested ID, the command fails instead of returning an incomplete list.
 
 ## Keep implementation synchronization compact
 

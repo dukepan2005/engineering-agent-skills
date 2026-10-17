@@ -14,7 +14,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
 from fakes import FakeClient, PatchOp  # noqa: E402
-from azure_devops_boards import AzureClient, parser, planning_snapshot, preflight  # noqa: E402
+from azure_devops_boards import AzureClient, parser, planning_snapshot, preflight, search_items  # noqa: E402
 
 
 ORG, PROJECT = "https://dev.azure.com/o", "P"
@@ -263,6 +263,72 @@ class AzurePlanningQueryTests(unittest.TestCase):
         saved = AzureClient(api, PROJECT).add_comment(42, "Added context")
 
         self.assertEqual(saved["commentId"], 17)
+
+
+class WorkItemSearchTests(unittest.TestCase):
+    def test_query_is_project_scoped_bounded_and_uses_fixed_type_filter(self):
+        class Api:
+            def _send(self, **kwargs):
+                self.request = kwargs
+                return SimpleNamespace(json=lambda: {"workItems": [{"id": 8}, {"id": 9}]})
+
+        api = Api()
+        ids = AzureClient(api, PROJECT).search_item_ids_by_title(
+            "Plan coach", ["User Story"], top=3,
+        )
+        query = api.request["content"]["query"]
+        self.assertEqual(ids, [8, 9])
+        self.assertEqual(api.request["route_values"], {"project": PROJECT})
+        self.assertIn("SELECT [System.Id]", query)
+        self.assertNotIn("SELECT TOP", query)
+        self.assertEqual(api.request["query_parameters"], {"$top": 3})
+        self.assertIn("[System.TeamProject] = @project", query)
+        self.assertIn("[System.Title] CONTAINS 'Plan coach'", query)
+        self.assertIn("[System.WorkItemType] IN ('User Story')", query)
+
+    def test_title_search_rejects_single_and_double_quotes(self):
+        for keyword in ("O'Brien", '"plan"'):
+            with self.subTest(keyword=keyword):
+                with self.assertRaisesRegex(RuntimeError, "must not contain single or double quotes"):
+                    AzureClient(object(), PROJECT).search_item_ids_by_title(keyword, ["User Story"], top=3)
+        with self.assertRaisesRegex(RuntimeError, "printable characters"):
+            AzureClient(object(), PROJECT).search_item_ids_by_title("plan\nwork", ["User Story"], top=3)
+
+    def test_summary_read_fails_if_any_requested_id_is_missing(self):
+        class Api:
+            def get_work_items(self, **kwargs):
+                self.request = kwargs
+                return [SimpleNamespace(id=8, fields={
+                    "System.Title": "A result", "System.WorkItemType": "User Story",
+                    "System.State": "New", "System.Tags": "FlowCoach",
+                })]
+
+        api = Api()
+        with self.assertRaisesRegex(RuntimeError, r"missed requested IDs: \[9\]"):
+            AzureClient(api, PROJECT).read_work_item_summaries([8, 9])
+        self.assertEqual(api.request["ids"], [8, 9])
+
+    def test_search_returns_bounded_metadata_and_marks_possible_truncation(self):
+        class Client:
+            def search_item_ids_by_title(self, title, types, top):
+                self.query = (title, types, top)
+                return [8, 9, 10]
+
+            def read_work_item_summaries(self, item_ids):
+                self.read_ids = item_ids
+                return [{"id": item_id, "title": f"Title {item_id}", "type": "User Story",
+                         "state": "New", "tags": "FlowCoach"} for item_id in item_ids]
+
+        client = Client()
+        args = SimpleNamespace(organization=ORG, project=PROJECT, title_contains=" plan ",
+                               types=["User Story"], limit=2)
+        out = _run(search_items, client, args)
+        self.assertEqual(client.query, ("plan", ("User Story",), 3))
+        self.assertEqual(client.read_ids, [8, 9])
+        self.assertTrue(out["possiblyTruncated"])
+        self.assertEqual(out["returned"], 2)
+        self.assertEqual(out["items"][0], {"id": 8, "title": "Title 8", "type": "User Story",
+                                           "state": "New", "tags": "FlowCoach"})
 
 
 if __name__ == "__main__":

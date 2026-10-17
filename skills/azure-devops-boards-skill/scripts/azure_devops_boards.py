@@ -14,6 +14,9 @@ RELATIONS = {"parent": "System.LinkTypes.Hierarchy-Reverse", "predecessor": "Sys
 PLANNING_TYPES = ("Task", "Bug")
 PLANNING_PARENT_TYPES = ("Story", "User Story")
 PLANNING_STATE = "New"
+SEARCH_TYPES = ("Epic", "Feature", "User Story", "Task", "Bug")
+SEARCH_FIELDS = ("System.Title", "System.WorkItemType", "System.State", "System.Tags")
+SEARCH_LIMIT_MAX = 100
 ACCEPTANCE_CRITERIA_FIELD = "Microsoft.VSTS.Common.AcceptanceCriteria"
 _BUG_SCOPE_FIELDS = frozenset({
     "Microsoft.VSTS.TCM.ReproSteps",
@@ -169,6 +172,47 @@ MODE (MustContain)"""
                 seen_ids.add(target_id)
                 target_ids.append(target_id)
         return target_ids
+
+    def search_item_ids_by_title(self, title_contains, item_types, top):
+        title_contains, item_types = _validate_search_filters(title_contains, item_types)
+        if not isinstance(top, int) or not 2 <= top <= SEARCH_LIMIT_MAX + 1:
+            raise RuntimeError(f"Search result cap must be between 2 and {SEARCH_LIMIT_MAX + 1}.")
+        type_literals = ", ".join(f"'{item_type}'" for item_type in item_types)
+        query = f"""SELECT [System.Id]
+FROM WorkItems
+WHERE [System.TeamProject] = @project
+  AND [System.Title] CONTAINS '{title_contains}'
+  AND [System.WorkItemType] IN ({type_literals})
+ORDER BY [System.Id]"""
+        result = self._api._send(http_method="POST", location_id=self.WIQL_ID, version="5.0",
+                                 route_values={"project": self._project}, query_parameters={"$top": top},
+                                 content={"query": query}, media_type="application/json").json()
+        ids, seen = [], set()
+        for item in result.get("workItems", []):
+            item_id = item.get("id")
+            if item_id is not None and int(item_id) not in seen:
+                seen.add(int(item_id))
+                ids.append(int(item_id))
+        return ids
+
+    def read_work_item_summaries(self, item_ids):
+        if not item_ids:
+            return []
+        items = self._api.get_work_items(ids=item_ids, project=self._project, fields=list(SEARCH_FIELDS))
+        by_id = {}
+        for item in items:
+            fields = item.fields or {}
+            by_id[item.id] = {
+                "id": item.id,
+                "title": fields.get("System.Title"),
+                "type": fields.get("System.WorkItemType"),
+                "state": fields.get("System.State"),
+                "tags": fields.get("System.Tags"),
+            }
+        missing = [item_id for item_id in item_ids if item_id not in by_id]
+        if missing:
+            raise RuntimeError(f"Work-item search read-back missed requested IDs: {missing}.")
+        return [by_id[item_id] for item_id in item_ids]
 
     def _route(self, target):
         if isinstance(target, NewItem): return {"project": self._project, "type": target.item_type}, "POST", self.CREATE_ID
@@ -339,6 +383,34 @@ def preflight(args):
           "attachments": _attachments(item), "linkedReferences": _linked_references(item),
           "comments": comments,
           "discussion": {"comments": comments}})
+
+
+def _validate_search_filters(title_contains, item_types):
+    if not isinstance(title_contains, str):
+        raise RuntimeError("Title search text must be a string.")
+    title_contains = title_contains.strip()
+    if (not title_contains or len(title_contains) > 128
+            or any(ord(char) < 32 or ord(char) == 127 for char in title_contains)):
+        raise RuntimeError("Title search text must contain 1 to 128 printable characters.")
+    if "'" in title_contains or '"' in title_contains:
+        raise RuntimeError("Title search text must not contain single or double quotes.")
+    item_types = tuple(dict.fromkeys(item_types or []))
+    if not item_types or any(item_type not in SEARCH_TYPES for item_type in item_types):
+        raise RuntimeError("Choose one or more supported work-item types.")
+    return title_contains, item_types
+
+
+def search_items(args):
+    title_contains, item_types = _validate_search_filters(args.title_contains, args.types)
+    if not 1 <= args.limit <= SEARCH_LIMIT_MAX:
+        raise RuntimeError(f"Search limit must be between 1 and {SEARCH_LIMIT_MAX}.")
+    client = connect(args)[0]
+    matched_ids = client.search_item_ids_by_title(title_contains, item_types, args.limit + 1)
+    truncated = len(matched_ids) > args.limit
+    items = client.read_work_item_summaries(matched_ids[:args.limit])
+    emit({"mode": "read", "project": args.project, "titleContains": title_contains,
+          "types": list(item_types), "limit": args.limit, "returned": len(items),
+          "possiblyTruncated": truncated, "items": items})
 
 
 def show_item(args):
@@ -646,6 +718,10 @@ def parser():
     root = argparse.ArgumentParser(description=__doc__); commands = root.add_subparsers(required=True)
     current = commands.add_parser("current-sprint"); connection(current, True); current.set_defaults(run=lambda a: print(sprint(a)))
     show = commands.add_parser("show"); connection(show); show.add_argument("--id", type=int, required=True); show.add_argument("--full", action="store_true", help="emit the full Azure JSON"); show.set_defaults(run=show_item)
+    search = commands.add_parser("search", help="read-only project-scoped search by title")
+    search.add_argument("--organization", required=True); search.add_argument("--project", required=True)
+    search.add_argument("--title-contains", required=True); search.add_argument("--type", dest="types", choices=SEARCH_TYPES, action="append", required=True)
+    search.add_argument("--limit", type=int, default=50); search.set_defaults(run=search_items)
     snapshot = commands.add_parser("planning-snapshot"); connection(snapshot); snapshot_ids = snapshot.add_mutually_exclusive_group(required=True); snapshot_ids.add_argument("--story", type=int); snapshot_ids.add_argument("--id", dest="item_ids", action="append", type=int, metavar="ID"); snapshot.set_defaults(run=planning_snapshot)
     preflight_p = commands.add_parser("implement-preflight"); connection(preflight_p); preflight_p.add_argument("--id", type=int, required=True); preflight_p.set_defaults(run=preflight)
     create_p = commands.add_parser("create"); connection(create_p, True); create_p.add_argument("--apply", action="store_true"); create_p.add_argument("--type", choices=("Epic", "Feature", "User Story", "Task", "Bug"), required=True); create_p.add_argument("--title", required=True); create_p.add_argument("--description-file", type=Path, required=True); create_p.add_argument("--acceptance-criteria-file", type=Path, help="Task- or Bug-only Markdown for Microsoft.VSTS.Common.AcceptanceCriteria"); create_p.add_argument("--repro-steps-file", type=Path, help="Bug-only Markdown rendered as HTML for Microsoft.VSTS.TCM.ReproSteps"); create_p.add_argument("--system-info-file", type=Path, help="Bug-only Markdown rendered as HTML for Microsoft.VSTS.TCM.SystemInfo"); create_p.add_argument("--comment-file", type=Path, help="Optional initial Markdown comment; for a Bug without --repro-steps-file it becomes HTML Repro Steps"); create_p.add_argument("--iteration"); create_p.add_argument("--tags", action="append", default=[])

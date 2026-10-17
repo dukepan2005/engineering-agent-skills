@@ -5,6 +5,7 @@ An [Agent Skills](https://agentskills.io/) package for safely managing Azure Dev
 It provides a shared, project-neutral implementation for:
 
 - Reading work items and the current team Sprint
+- Searching work items by title within one explicitly selected project; the returned result count is capped with `$top`, quoted/control-character keywords are rejected, and missing IDs in summary read-back cause failure
 - Creating Epics, Features, User Stories, Tasks, and Bugs
 - Updating descriptions, workflow states, and iterations
 - Posting comments with explicit Markdown format
@@ -94,6 +95,9 @@ Read operations execute immediately:
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" current-sprint
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" show --id 61               # compact summary
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" show --id 61 --full        # raw Azure JSON
+sh "$SKILL_DIR/scripts/azure-devops-boards.sh" search \
+  --organization https://dev.azure.com/example --project ExampleProject \
+  --title-contains plan --type "User Story" --limit 20
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" implement-preflight --id 61
 ```
 
