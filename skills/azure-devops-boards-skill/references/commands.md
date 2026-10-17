@@ -68,7 +68,8 @@ sh "$HELPER" create \
   --comment-file /tmp/initial-repro.md
 
 sh "$HELPER" update \
-  --id 123 --state Active --description-file /tmp/task-description.md \
+  --id 123 --expected-rev 8 --state Active \
+  --description-file /tmp/task-description.md \
   --acceptance-criteria-file /tmp/task-ac.md
 
 sh "$HELPER" update --id 123 --assigned-to 'person@example.com'
@@ -100,7 +101,18 @@ identity's `uniqueName` (normally its email address), available from the
 `System.AssignedTo` field of an existing item or the target user's identity
 record. The helper checks the resolved identity's `uniqueName` case-insensitively
 during validation and persisted read-back. Blank input is rejected; this option
-does not clear an assignment. The existing revision and mutation checks apply.
+does not clear an assignment.
+
+`update --expected-rev REV` optionally binds an update to the revision used to
+prepare its inputs. REV must be a positive integer. When supplied, the helper
+reads the current item and stops before validation if its revision differs; the
+same REV is the leading `/rev` test in the JSON Patch used for validation and
+apply. A stale revision is never silently replaced or retried. When a
+`--description-file` was prepared or merged from a preflight read, pass that
+read's `System.Rev`; if it is stale, re-read the item, reconcile the body with
+the new Description, prepare a new file, and validate again using the newly
+reviewed revision. Omitting `--expected-rev` preserves the existing behavior for
+simple updates.
 
 When creating a Bug, pass reproduction and environment evidence through
 `--repro-steps-file` and `--system-info-file`; do not put those authoritative

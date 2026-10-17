@@ -167,6 +167,57 @@ class UpdateCommandTests(unittest.TestCase):
         self.assertEqual(out, {"mode": "applied", "id": 42, "rev": 4, "fields": {"System.State": "Active"}})
         self.assertEqual(fake.applies, 1)
 
+    def test_matching_expected_revision_guards_validation_and_apply(self):
+        for apply in (False, True):
+            with self.subTest(apply=apply):
+                fake = self._seeded()
+                args = parser().parse_args([
+                    "update", "--organization", ORG, "--project", PROJECT,
+                    "--id", "42", "--expected-rev", "3",
+                    "--description-file", "/tmp/reviewed.md",
+                ] + (["--apply"] if apply else []))
+                args.description_file = _file("Reviewed body")
+                with mock.patch.object(fake, "validate", wraps=fake.validate) as validate, \
+                        mock.patch.object(fake, "apply", wraps=fake.apply) as persist:
+                    out = _run(update, fake, args)
+                self.assertEqual(out["mode"], "applied" if apply else "validated")
+                for call in validate.call_args_list + persist.call_args_list:
+                    guard = call.args[0][0]
+                    self.assertEqual((guard.op, guard.path, guard.value), ("test", "/rev", 3))
+                self.assertEqual(fake.validate_calls, 1)
+                self.assertEqual(fake.applies, int(apply))
+                stored = fake.read(42)
+                self.assertEqual(stored["rev"], 4 if apply else 3)
+                self.assertEqual(stored["fields"].get("System.Description"),
+                                 "Reviewed body" if apply else None)
+
+    def test_stale_expected_revision_stops_before_validation_or_write(self):
+        for apply in (False, True):
+            for revision in (2, 4):
+                with self.subTest(apply=apply, revision=revision):
+                    fake = self._seeded()
+                    before = fake.read(42)
+                    args = self._args(apply=apply, description_file=_file("Stale body"))
+                    args.expected_rev = revision
+                    with self.assertRaisesRegex(RuntimeError, "Revision mismatch"):
+                        _run(update, fake, args)
+                    self.assertEqual(fake.validate_calls, 0)
+                    self.assertEqual(fake.applies, 0)
+                    self.assertEqual(fake.read(42), before)
+
+    def test_nonpositive_expected_revision_is_rejected_before_connect(self):
+        for revision in (0, -1):
+            with self.subTest(revision=revision):
+                args = parser().parse_args([
+                    "update", "--organization", ORG, "--project", PROJECT,
+                    "--id", "42", "--state", "Active",
+                    "--expected-rev", str(revision), "--apply",
+                ])
+                with mock.patch("azure_devops_boards.connect") as connect:
+                    with self.assertRaisesRegex(RuntimeError, "positive integer"):
+                        update(args)
+                connect.assert_not_called()
+
     def test_no_field_to_update_raises(self):
         with self.assertRaises(RuntimeError) as cm:
             _run(update, self._seeded(), self._args(apply=True, state=None))
