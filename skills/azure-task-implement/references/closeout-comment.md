@@ -11,8 +11,10 @@ the commit and the work item already carry the detail.
 Implemented in <commit-sha>: <areas changed>.
 
 ## Acceptance
-All acceptance criteria are satisfied. <one line per criterion from the preflight
-scope: how each is met; or state the scope defined no acceptance criteria>
+All acceptance criteria are satisfied. <one line per criterion from the live
+Description: cite the file/type/function (and test seam if the AC requires one)
+in current code; do not cite only the commit title or an implementation summary.
+If any criterion cannot be shown in code, do not close the item>
 
 ## Verification
 <focused commands run, with their pass evidence — not the full suite>

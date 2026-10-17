@@ -27,10 +27,6 @@ class _RevAdvances(FakeClient):
     """The rev advances on every validate — there is no reconciliation left to
     attempt, so a conflict must surface on the very first attempt."""
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.validate_calls = 0
-
     def validate(self, document, target):
         self.validate_calls += 1
         if not self._is_new(target):
@@ -81,14 +77,46 @@ class ValidationGuardsTheWriteTests(unittest.TestCase):
         )
         self.assertEqual(fake.applies, 0)
 
-    def test_description_mismatch_at_validation_prevents_write(self):
-        fake = FakeClient.with_item(42)
+    def test_new_item_description_mismatch_at_validation_prevents_write(self):
+        fake = FakeClient()
         with self.assertRaises(RuntimeError) as cm:
-            safe_mutate(client=fake, target=ExistingItem(42),
+            safe_mutate(client=fake, target=NewItem("Task"),
                         document=[PatchOp("add", "/fields/System.Description", "stored"),
                                   PatchOp("add", "/multilineFieldsFormat/System.Description", "markdown")],
                         expectation=Expectation(description="expected"), apply=True)
-        self.assertIn("Description or Markdown metadata did not persist.", str(cm.exception))
+        self.assertEqual(str(cm.exception), "Validation failed for Description or Markdown metadata.")
+        self.assertEqual(fake.applies, 0)
+
+    def test_existing_item_description_not_projected_in_validate_only_is_accepted(self):
+        fake = FakeClient.with_item(42, echo_description_on_existing_validate=False)
+        fake.items[42]["fields"]["System.Description"] = "old"
+        result = safe_mutate(
+            client=fake,
+            target=ExistingItem(42),
+            document=[PatchOp("test", "/rev", 1),
+                      PatchOp("add", "/fields/System.Description", "new"),
+                      PatchOp("add", "/multilineFieldsFormat/System.Description", "markdown")],
+            expectation=Expectation(description="new"),
+            apply=False,
+        )
+        self.assertEqual(result, {"mode": "validated"})
+        self.assertEqual(fake.validate_calls, 1)
+        self.assertEqual(fake.applies, 0)
+
+    def test_existing_item_description_omission_does_not_skip_field_validation(self):
+        fake = FakeClient.with_item(42, echo_description_on_existing_validate=False)
+        with self.assertRaises(RuntimeError) as cm:
+            safe_mutate(
+                client=fake,
+                target=ExistingItem(42),
+                document=[PatchOp("add", "/fields/System.Description", "new"),
+                          PatchOp("add", "/multilineFieldsFormat/System.Description", "markdown"),
+                          PatchOp("add", "/fields/System.State", "Active")],
+                expectation=Expectation(fields={"System.State": "Done"}, description="new"),
+                apply=True,
+            )
+        self.assertIn("Validation failed for System.State", str(cm.exception))
+        self.assertEqual(fake.validate_calls, 1)
         self.assertEqual(fake.applies, 0)
 
     def test_relation_not_projected_at_validation_is_accepted(self):
@@ -133,6 +161,45 @@ class ReadBackGuardsAppliedSuccessTests(unittest.TestCase):
                         document=[PatchOp("add", "/fields/System.State", "Active")],
                         expectation=Expectation(fields={"System.State": "Active"}), apply=True)
         self.assertEqual(r, {"mode": "applied", "id": 42, "rev": 2})
+        self.assertEqual(fake.applies, 1)
+
+    def test_existing_item_description_is_checked_after_apply(self):
+        fake = FakeClient.with_item(42, echo_description_on_existing_validate=False)
+        result = safe_mutate(
+            client=fake,
+            target=ExistingItem(42),
+            document=[PatchOp("test", "/rev", 1),
+                      PatchOp("add", "/fields/System.Description", "new"),
+                      PatchOp("add", "/multilineFieldsFormat/System.Description", "markdown")],
+            expectation=Expectation(description="new"),
+            apply=True,
+        )
+        self.assertEqual(result, {"mode": "applied", "id": 42, "rev": 2})
+        self.assertEqual(fake.validate_calls, 1)
+        self.assertEqual(fake.applies, 1)
+
+    def test_missing_markdown_metadata_fails_after_apply(self):
+        class MissingMarkdownReadBack(FakeClient):
+            def read(self, item_id):
+                item = super().read(item_id)
+                item["multilineFieldsFormat"].pop("System.Description", None)
+                return item
+
+        fake = MissingMarkdownReadBack.with_item(
+            42, echo_description_on_existing_validate=False,
+        )
+        with self.assertRaises(RuntimeError) as cm:
+            safe_mutate(
+                client=fake,
+                target=ExistingItem(42),
+                document=[PatchOp("test", "/rev", 1),
+                          PatchOp("add", "/fields/System.Description", "new"),
+                          PatchOp("add", "/multilineFieldsFormat/System.Description", "markdown")],
+                expectation=Expectation(description="new"),
+                apply=True,
+            )
+        self.assertIn("Description or Markdown metadata did not persist.", str(cm.exception))
+        self.assertEqual(fake.validate_calls, 1)
         self.assertEqual(fake.applies, 1)
 
 
