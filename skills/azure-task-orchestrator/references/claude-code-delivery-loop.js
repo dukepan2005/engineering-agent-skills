@@ -173,8 +173,9 @@ function parsePreflight(value, itemId) {
 function parseCloseout(value, itemId) {
   const result = parseJson(value, `closeout ${itemId}`)
   const expectedId = Number(String(itemId).replace(/^AB#/, ''))
-  if (!result || result.mode !== 'applied' || result.id !== expectedId) {
-    throw new Error(`closeout ${itemId} must return mode applied for work item ${expectedId}`)
+  if (!result || result.mode !== 'applied' || result.id !== expectedId
+    || result.fields?.['System.State'] !== 'Closed') {
+    throw new Error(`closeout ${itemId} must apply Closed state to work item ${expectedId}`)
   }
   return result
 }

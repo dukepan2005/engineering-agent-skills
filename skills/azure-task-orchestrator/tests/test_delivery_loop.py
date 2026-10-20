@@ -71,7 +71,9 @@ assertStopped(await run({repair:true, transformReview:(r,round)=>round===2?{...r
         self.run_probe(r"""
 for (const closeout of [null, {}, {closed:true}, {mode:'validated',id:123},
   {error:'revision mismatch'}, 'Boards update failed', '{invalid JSON',
-  {...applied,id:999}, JSON.stringify({mode:'validated',id:123})]) {
+  {...applied,id:999}, {mode:'applied',id:123}, {...applied,fields:{}},
+  {...applied,fields:{'System.State':'Active'}},
+  {...applied,fields:null}, JSON.stringify({mode:'validated',id:123})]) {
   assertStopped(await run({closeout}), 'closeout');
 }
 for (const closeout of [applied, JSON.stringify(applied)]) {
