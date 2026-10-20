@@ -38,7 +38,7 @@ Do not run any helper command yourself. Do not read
 `references/commands.md` into this router context. Do not search for duplicate
 work items before creating one.
 
-`add-link` accepts only `parent`, `predecessor`, and `related`, each with a
+`add-link` and `remove-link` accept only `parent`, `predecessor`, and `related`, each with a
 work-item id. Branch, commit, and pull request artifacts are not helper
 operations. Do not invent a `branch-link` subcommand, and do not push the
 Azure DevOps git remote to create one.

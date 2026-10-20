@@ -53,6 +53,9 @@ class FakeClient:
                 if item.get("rev") != o.value:
                     raise RuntimeError("rev mismatch (optimistic concurrency)")
                 continue
+            if o.op == "remove" and o.path.startswith("/relations/"):
+                del item["relations"][int(o.path.rsplit("/", 1)[-1])]
+                continue
             if o.op != "add":
                 continue
             if o.path.startswith("/fields/"):

@@ -53,6 +53,7 @@ class Expectation:
     multiline_formats: dict = field(default_factory=dict)
     description: str = None
     relation: tuple = None
+    removed_relation: tuple = None
 
 
 def sdk():
@@ -456,6 +457,9 @@ def _evaluate(item, expectation, phase, *, check_relation=True, check_descriptio
     if check_relation and expectation.relation is not None:
         rel, url = expectation.relation
         if not _has_relation(item, rel, url): raise RuntimeError(f"{phase} failed for relation {rel}.")
+    if check_relation and expectation.removed_relation is not None:
+        rel, url = expectation.removed_relation
+        if _has_relation(item, rel, url): raise RuntimeError(f"{phase} failed for removed relation {rel}.")
 
 
 def safe_mutate(*, client, target, document, expectation, apply):
@@ -606,6 +610,33 @@ def add_link(args):
     emit({"mode": result["mode"], "id": args.id, "kind": args.kind, "targetId": args.target_id})
 
 
+def remove_link(args):
+    for option in ("id", "target_id", "expected_rev"):
+        value = getattr(args, option, None)
+        if type(value) is not int or value < 1:
+            raise RuntimeError(f"--{option.replace('_', '-')} must be a positive integer.")
+    client, cls = connect(args)
+    before = client.read(args.id)
+    if before["rev"] != args.expected_rev:
+        raise RuntimeError(
+            f"Revision mismatch for work item {args.id}: expected {args.expected_rev}, "
+            f"found {before['rev']}. Re-read and reconcile before retrying."
+        )
+    value = relation(args, args.kind, args.target_id)
+    matches = [index for index, stored in enumerate(before.get("relations", []))
+               if stored.get("rel") == value["rel"]
+               and _relation_identity(stored.get("url", "")) == _relation_identity(value["url"])]
+    if not matches:
+        raise RuntimeError(f"No {args.kind} relation from work item {args.id} to {args.target_id}.")
+    if len(matches) != 1:
+        raise RuntimeError(f"Ambiguous {args.kind} relation from work item {args.id} to {args.target_id}: {len(matches)} matches.")
+    document = [op(cls, "test", "/rev", args.expected_rev),
+                op(cls, "remove", f"/relations/{matches[0]}", None)]
+    result = safe_mutate(client=client, target=ExistingItem(args.id), document=document,
+                         expectation=Expectation(removed_relation=(value["rel"], value["url"])), apply=args.apply)
+    emit({"mode": result["mode"], "id": args.id, "kind": args.kind, "targetId": args.target_id})
+
+
 def add_comment(args):
     client, _ = connect(args); text = args.comment_file.read_text()
     if not text.strip(): raise RuntimeError("Comment must not be empty.")
@@ -733,6 +764,7 @@ def parser():
     comment = commands.add_parser("add-comment"); connection(comment); comment.add_argument("--apply", action="store_true"); comment.add_argument("--id", type=int, required=True); comment.add_argument("--comment-file", type=Path, required=True); comment.set_defaults(run=add_comment)
     close = commands.add_parser("close-task"); connection(close); close.add_argument("--apply", action="store_true"); close.add_argument("--id", type=int, required=True); close.add_argument("--expected-rev", type=int); close.add_argument("--state"); close.add_argument("--comment-file", type=Path, required=True); close.add_argument("--description-file", type=Path); close_ac = close.add_mutually_exclusive_group(); close_ac.add_argument("--acceptance-criteria-file", type=Path, help="Task- or Bug-only Markdown for Microsoft.VSTS.Common.AcceptanceCriteria"); close_ac.add_argument("--check-ac", metavar="all|FRAGMENT", help="Check matching Markdown boxes in the native Acceptance Criteria field"); close.set_defaults(run=close_task)
     link = commands.add_parser("add-link"); connection(link); link.add_argument("--apply", action="store_true"); link.add_argument("--id", type=int, required=True); link.add_argument("--kind", choices=tuple(RELATIONS), required=True); link.add_argument("--target-id", type=int, required=True); link.set_defaults(run=add_link)
+    remove = commands.add_parser("remove-link"); connection(remove); remove.add_argument("--apply", action="store_true"); remove.add_argument("--id", type=int, required=True); remove.add_argument("--kind", choices=tuple(RELATIONS), required=True); remove.add_argument("--target-id", type=int, required=True); remove.add_argument("--expected-rev", type=int, required=True); remove.set_defaults(run=remove_link)
     return root
 
 

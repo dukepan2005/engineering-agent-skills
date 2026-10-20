@@ -82,6 +82,9 @@ sh "$HELPER" add-comment \
 sh "$HELPER" add-link \
   --id 124 --kind predecessor --target-id 123
 
+sh "$HELPER" remove-link \
+  --id 124 --kind predecessor --target-id 123 --expected-rev 8
+
 sh "$HELPER" close-task \
   --id 123 --expected-rev 8 --state Closed \
   --acceptance-criteria-file /tmp/task-ac.md \
@@ -98,6 +101,11 @@ mutually exclusive with `--acceptance-criteria-file`, not with
 `--description-file`. For
 `predecessor`, `--target-id` blocks the current `--id`. For `parent`, the target
 is the current item's parent. Re-adding an existing relation returns `unchanged`.
+`remove-link` accepts the same three kinds and work-item targets, requires the
+source item's `--expected-rev`, and removes exactly one matching relation from a
+fresh read. Missing or ambiguous matches and stale revisions fail without retry.
+It validates without persisting by default; add `--apply` to delete and verify
+the persisted removal. Other fields and relations are preserved.
 `update --assigned-to UNIQUE_NAME` sets the work-item owner. Use the Azure
 identity's `uniqueName` (normally its email address), available from the
 `System.AssignedTo` field of an existing item or the target user's identity
