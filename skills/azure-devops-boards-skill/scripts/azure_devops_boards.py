@@ -244,15 +244,16 @@ def _relation_identity(url):
     return base.rsplit("/", 1)[0], int(target)
 
 
-def _has_relation(item, rel, url):
+def _relation_matches(stored, rel, url):
     expected_identity = _relation_identity(url)
-    return any(
-        stored.get("rel") == rel and (
-            stored.get("url") == url if expected_identity is None
-            else _relation_identity(stored.get("url", "")) == expected_identity
-        )
-        for stored in item.get("relations", [])
+    return stored.get("rel") == rel and (
+        stored.get("url") == url if expected_identity is None
+        else _relation_identity(stored.get("url", "")) == expected_identity
     )
+
+
+def _has_relation(item, rel, url):
+    return any(_relation_matches(stored, rel, url) for stored in item.get("relations", []))
 
 
 def _relation_summary(item):
@@ -630,8 +631,7 @@ def remove_link(args):
         )
     value = relation(args, args.kind, args.target_id)
     matches = [index for index, stored in enumerate(before.get("relations", []))
-               if stored.get("rel") == value["rel"]
-               and _relation_identity(stored.get("url", "")) == _relation_identity(value["url"])]
+               if _relation_matches(stored, value["rel"], value["url"])]
     if not matches:
         raise RuntimeError(f"No {args.kind} relation from work item {args.id} to {args.target_id}.")
     if len(matches) != 1:
