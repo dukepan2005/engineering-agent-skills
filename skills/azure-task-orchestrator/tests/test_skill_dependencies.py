@@ -1,6 +1,7 @@
 import unittest
 from pathlib import Path
 import re
+import subprocess
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -453,6 +454,55 @@ class SkillDependencyContractTests(unittest.TestCase):
             / "execution-profiles.md"
         ).read_text()
         self.assertNotIn("post-fix review", registry)
+
+
+    def test_review_candidate_controls_both_axes_and_repair_round(self) -> None:
+        script_path = REPO_ROOT / "skills/azure-task-orchestrator/references/claude-code-delivery-loop.js"
+        harness = r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+const source = fs.readFileSync(process.argv[1], 'utf8').replace('export const meta', 'const meta');
+const execute = new AsyncFunction('args', 'agent', 'phase', 'log', source);
+async function run(reviewCandidate, reviewEvidence = 'Bounded reviewer contract') {
+  const calls = [];
+  const item = {id:'AB#123', type:'Task', plannedCandidate:'opus-high', reviewCandidate,
+    reviewEvidence, plannerEvidence:'Implementation hazard', orderReason:'stable'};
+  const agent = async (prompt, options) => {
+    calls.push(options);
+    if (options.label.startsWith('preflight_')) return {rev:1};
+    if (options.label.startsWith('closeout_')) return {closed:true};
+    if (options.label.startsWith('review_')) {
+      const round = options.label.split('_')[1];
+      const axis = options.label.includes('_standards_') ? 'standards' : 'spec';
+      return {axis,reviewBase:'base',head:round==='1'?'impl':'repair',parent:round==='1'?'base':'impl',
+        status:round==='1'?'findings':'clean', findings:round==='1'?[{priority:'P2',location:'file:1',summary:'fault',evidence:'proof'}]:[]};
+    }
+    return {outcome:'ready_for_review', reviewBase:'base', taskStartCommit:'base',
+      commit:options.label.startsWith('delivery_')?'impl':'repair', verification:[], acceptanceEvidence:[]};
+  };
+  const report = await execute({validatedPlan:[item],trackerConnection:{organization:'org',project:'project'}},agent,()=>{},()=>{});
+  return {report,calls};
+}
+(async () => {
+  const {report,calls} = await run('sonnet-medium');
+  assert.equal(report.completedItems, 1);
+  const reviewers = calls.filter(x=>x.label.startsWith('review_'));
+  assert.equal(reviewers.length,4);
+  assert.ok(reviewers.every(x=>x.model==='sonnet' && x.effort==='medium'));
+  assert.ok(calls.filter(x=>x.label.startsWith('preflight_') || x.label.startsWith('closeout_')).every(x=>x.model==='haiku' && x.effort==='low'));
+  assert.ok(calls.filter(x=>x.label.startsWith('delivery_') || x.label.startsWith('Repair_')).every(x=>x.model==='opus' && x.effort==='high'));
+  assert.deepEqual(report.results[0].reviewMapping,{candidateId:'sonnet-medium',model:'sonnet',reasoning_effort:'medium'});
+  assert.equal(report.results[0].reviewEvidence,'Bounded reviewer contract');
+  const legacy = await run('haiku-low');
+  assert.ok(legacy.calls.filter(x=>x.label.startsWith('review_')).every(x=>x.model==='haiku' && x.effort==='low'));
+  await assert.rejects(()=>run(undefined), /Unknown review candidate/);
+  await assert.rejects(()=>run('additional-1'), /Unknown review candidate/);
+  await assert.rejects(()=>run('toString'), /Unknown review candidate/);
+  await assert.rejects(()=>run('sonnet-medium',' '), /reviewEvidence are required/);
+})().catch(e=>{console.error(e);process.exitCode=1});
+"""
+        subprocess.run(["node", "-e", harness, str(script_path)], check=True, capture_output=True, text=True)
 
 
 if __name__ == "__main__":

@@ -1,11 +1,11 @@
 ---
 name: task-model-planner
-description: Analyze a parent-provided Azure work-item snapshot produced after the grill-with-docs, to-spec, and to-tickets skills, then recommend one source-backed execution candidate for each item. Use when the user asks which model profile, reasoning effort, or cost-aware execution configuration should implement a Story's child items or an explicit work-item set, including Tasks and Bugs.
+description: Analyze a parent-provided Azure work-item snapshot produced after the grill-with-docs, to-spec, and to-tickets skills, then recommend independent source-backed implementation and dual-review candidates for each item. Use when the user asks which model profile, reasoning effort, or cost-aware execution configuration should implement a Story's child items or an explicit work-item set, including Tasks and Bugs.
 ---
 
 # Task Model Planner
 
-Produce a read-only implementation model plan. Do not implement or mutate the
+Produce a read-only implementation and dual-review model plan. Do not implement or mutate the
 tracker.
 
 ## Establish the Work Set
@@ -302,6 +302,18 @@ choice and `sol-xhigh` as exceptional. Do not invent profiles. `luna-max` is
 the only built-in `max` profile for Codex/ChatGPT and requires every
 qualified-Luna gate above; this workflow does not include a Sol `max` candidate.
 
+## Choose the Review Candidate
+
+For every item, separately assess both review axes against the registry's
+review pool. Use current model/host and evaluation evidence above, failure
+cost, non-local reasoning hazards, and the ability of focused tests to reveal
+a missed defect. Give one `reviewCandidate` ID plus `reviewEvidence`; do not
+inherit the implementation profile or the Boards helper profile. Explain the
+trade-off and any unavailable exact-configuration evaluation. Both independent
+axes use the selected profile, which the orchestrator presents for user
+confirmation alongside the implementation candidate. Review-profile changes
+require a revised approved plan; repair effort changes apply to implementation.
+
 ## Explain Every Recommendation
 
 For each work item:
@@ -345,23 +357,25 @@ Use this structure:
 
 ## Recommendations
 
-| Work item | Scope summary | Execution candidate ID | Why not lower | Confidence |
-|---|---|---|---|---|
-| AB#... | ... | profile-id or additional-id | ... | high |
+| Work item | Scope summary | Execution candidate ID | Review candidate ID | Why these profiles | Confidence |
+|---|---|---|---|---|---|
+| AB#... | ... | profile-id or additional-id | review-profile-id | ... | high |
 
 ## Work-item analysis
 
 ### AB#... — <title>
 - Evidence and complexity signals:
 - Execution candidate ID:
+- Review candidate ID (`reviewCandidate`):
+- Review rationale (`reviewEvidence`):
 - Why this is the lowest-cost reliable profile:
 - Escalation triggers:
 - Unknowns:
 
 ## Execution plan
 
-1. AB#... — dependency or ordering reason
-2. AB#... — dependency or ordering reason
+1. AB#... — `plannedCandidate`: profile-id; `reviewCandidate`: review-profile-id; dependency or ordering reason
+2. AB#... — `plannedCandidate`: profile-id; `reviewCandidate`: review-profile-id; dependency or ordering reason
 
 ## Cost and sequencing summary
 - Work items by execution candidate ID:

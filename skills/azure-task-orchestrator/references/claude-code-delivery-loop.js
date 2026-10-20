@@ -11,6 +11,8 @@
 //     "type": "Task",
 //     "title": "...",
 //     "plannedCandidate": "opus-medium",
+//     "reviewCandidate": "haiku-low",
+//     "reviewEvidence": "Bounded contract with focused negative-path tests",
 //     "plannerEvidence": "...",
 //     "orderReason": "..."
 //   }],
@@ -49,6 +51,23 @@ const PROFILES = {
   'opus-high': { model: 'opus', effort: 'high' },
   'opus-max': { model: 'opus', effort: 'max' },
   'opus-xhigh': { model: 'opus', effort: 'xhigh' },
+}
+
+const REVIEW_PROFILES = {
+  ...PROFILES,
+  'haiku-low': { model: 'haiku', effort: 'low' },
+}
+
+function resolveReviewCandidate(candidateId) {
+  if (!Object.hasOwn(REVIEW_PROFILES, candidateId)) {
+    throw new Error(`Unknown review candidate ID: ${candidateId}`)
+  }
+  return REVIEW_PROFILES[candidateId]
+}
+
+function describeReviewCandidate(candidateId) {
+  const candidate = resolveReviewCandidate(candidateId)
+  return { candidateId, model: candidate.model, reasoning_effort: candidate.effort }
 }
 
 function resolveCandidate(candidateId) {
@@ -173,17 +192,10 @@ file. Inspect the actual diff and return JSON only with axis, reviewBase, head,
 parent, status, findings, and summary.
 ${shared}`
 
+  const reviewCandidate = resolveReviewCandidate(item.reviewCandidate)
   const [standardsResult, specResult] = await Promise.all([
-    agent(prompt('Standards'), {
-      model: 'haiku',
-      effort: 'low',
-      label: `review_${round}_standards_${item.id}`,
-    }),
-    agent(prompt('Spec'), {
-      model: 'haiku',
-      effort: 'low',
-      label: `review_${round}_spec_${item.id}`,
-    }),
+    agent(prompt('Standards'), agentOptions(reviewCandidate, `review_${round}_standards_${item.id}`)),
+    agent(prompt('Spec'), agentOptions(reviewCandidate, `review_${round}_spec_${item.id}`)),
   ])
 
   if (!standardsResult || !specResult) throw new Error(`review ${round} child returned null`)
@@ -245,6 +257,10 @@ for (const item of plan) {
     throw new Error(`plannerEvidence and orderReason are required for ${item.id || 'a work item'}`)
   }
   resolveCandidate(item.plannedCandidate)
+  resolveReviewCandidate(item.reviewCandidate)
+  if (!item.reviewCandidate || typeof item.reviewEvidence !== 'string' || !item.reviewEvidence.trim()) {
+    throw new Error(`Built-in reviewCandidate and reviewEvidence are required for ${item.id}`)
+  }
 }
 
 if (!trackerConnection?.organization || !trackerConnection?.project) {
@@ -259,6 +275,8 @@ for (let i = 0; i < plan.length; i++) {
   const itemId = item.id
   const itemType = item.type || 'Task'
   const plannedCandidate = item.plannedCandidate
+  const reviewCandidate = item.reviewCandidate
+  const reviewEvidence = item.reviewEvidence
   let effectiveCandidate = plannedCandidate
   let implementation = null
   let implementationCommit = null
@@ -330,7 +348,7 @@ ${JSON.stringify(preflightData, null, 2)}
         const remainingFindings = secondReview.flatMap((report) =>
           report.findings.map((finding) => ({ ...finding, axis: report.axis }))
         )
-        results.push({ id: itemId, type: itemType, plannedCandidate, effectiveCandidate, implementationCommit, repairCommit, status: 'review_action_required', remainingFindings, reviewRounds })
+        results.push({ id: itemId, type: itemType, plannedCandidate, effectiveCandidate, reviewCandidate, reviewEvidence, implementationCommit, repairCommit, status: 'review_action_required', remainingFindings, reviewRounds })
         stoppedAt = itemId
         break
       }
@@ -338,7 +356,7 @@ ${JSON.stringify(preflightData, null, 2)}
 
     // === Closeout after the first clean round or the second clean round ===
     phase('Closeout')
-    const implementationSummary = JSON.stringify({ implementationCommit, repairCommit, implementation, reviewRounds })
+    const implementationSummary = JSON.stringify({ implementationCommit, repairCommit, implementation, reviewRounds, reviewCandidate, reviewEvidence, reviewMapping: describeReviewCandidate(reviewCandidate) })
     const preflightRev = preflightData.rev || preflightData.revision || 'unknown'
     const closeoutResult = await agent(
       `Use \`$azure-devops-boards-skill\` in its semantic \`task-boards-ops\` role. Read the current full work item with \`show ${boardsConnectionArgs} --full --id ${itemId}\`. Read Acceptance Criteria from \`Microsoft.VSTS.Common.AcceptanceCriteria\`, separately from Description. Apply only evidence-backed Markdown checklist changes specified by the implementation and review summary, preserving all other Acceptance Criteria and Description content. Write the resulting Acceptance Criteria to \`/tmp/acceptance_criteria_${itemId}.md\` and a Markdown completion comment to \`/tmp/comment_${itemId}.md\`. Then run \`close-task --apply ${boardsConnectionArgs} --id ${itemId} --expected-rev ${preflightRev} --state Closed --acceptance-criteria-file /tmp/acceptance_criteria_${itemId}.md --comment-file /tmp/comment_${itemId}.md\`. Return the JSON output unchanged. Do not use \`--check-ac\`, and do not perform any non-Boards work.
@@ -355,6 +373,8 @@ ${implementationSummary}`,
       type: itemType,
       plannedCandidate,
       effectiveCandidate,
+      reviewCandidate,
+      reviewEvidence,
       reviewBase: implementation.reviewBase,
       implementationCommit,
       repairCommit,
@@ -371,6 +391,8 @@ ${implementationSummary}`,
       type: itemType,
       plannedCandidate,
       effectiveCandidate,
+      reviewCandidate,
+      reviewEvidence,
       implementationCommit,
       repairCommit,
       status: 'delivery_failed',
@@ -384,6 +406,7 @@ ${implementationSummary}`,
 
 const reportedResults = results.map((result) => ({
   ...result,
+  reviewMapping: describeReviewCandidate(result.reviewCandidate),
   plannedMapping: describeCandidate(result.plannedCandidate),
   effectiveMapping: describeCandidate(result.effectiveCandidate),
 }))

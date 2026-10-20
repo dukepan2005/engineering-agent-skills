@@ -1,6 +1,6 @@
 ---
 name: azure-task-orchestrator
-description: Plan and deliver implementation-ready Azure DevOps Boards work items under a Story or in an explicit item set, in dependency order. Use when the user wants the task-model-planner skill to choose a built-in or caller-supplied execution candidate for each item, then wants the parent orchestrator to control implementation, flat two-axis review, repair, and closeout workers with that exact candidate.
+description: Plan and deliver implementation-ready Azure DevOps Boards work items under a Story or in an explicit item set, in dependency order. Use when the user wants the task-model-planner skill to choose a built-in or caller-supplied execution candidate for each item, then wants the parent orchestrator to control implementation, flat two-axis review, repair, and closeout workers with those exact implementation and review candidates.
 ---
 
 # Azure Task Orchestrator
@@ -23,8 +23,8 @@ Represent any requested choices internally as an optional
 ask the user to specify a host. The model and effort must be an exact pair
 supported by that host; do not infer aliases or translate effort names. These
 candidates are temporary for this invocation and never modify the canonical
-profile registry. They add implementation choices only; helper agent profiles
-remain unchanged.
+profile registry. They add implementation choices only; review choices use
+the registry section below, and Boards helper profiles remain unchanged.
 
 ## Require Skills and Spawn Control Before Work
 
@@ -83,15 +83,20 @@ embedded in this reusable skill.
 
 ## Host-specific Helper-Agent Profiles
 
-Use the matching profile for planning snapshot, preflight, flat-review, and
-closeout helper agents:
+Use the matching profile only for Boards planning snapshot, preflight, and
+closeout children:
 
 - Codex/ChatGPT: prefer GPT-6 Luna with `reasoning_effort=high`; if it cannot
   be spawned, use GPT-6 Sol with `reasoning_effort=medium`.
 - Claude Code: use `haiku` with `effort: 'low'` for these bounded helper roles.
 - Cursor: use `composer2.5` and leave reasoning effort unset.
 
-The chosen host-specific helper profile applies at every helper stage below.
+The chosen helper profile applies only to those Boards operations. Code review
+uses each item's independently planned `reviewCandidate`, never this helper
+profile. For an already approved plan missing a review candidate, use an
+explicit user-authorized review override if supplied, recording its exact
+mapping and rationale. Otherwise obtain a review choice before dispatch; do
+not infer one from the helper profile or silently revise the existing plan.
 
 ## Validate Optional Run-Scoped Candidates
 
@@ -225,7 +230,12 @@ the parent itself cannot spawn this direct Boards child.
    stale against a user-reported scope change, or contains an unsupported
    candidate. Report the mismatch and request a corrected plan. Do not infer an
    order or candidate from report prose.
-8. Preserve each item's source-backed model-selection rationale and ordering
+8. Require a separate `reviewCandidate` and `reviewEvidence` for every item.
+   Resolve it against the registry's review candidates for the current host;
+   reject missing, unsupported, or free-form choices before dispatch. Require
+   the recommendation row and execution entry to agree on this choice. Keep
+   Boards helpers and the implementation candidate independent.
+9. Preserve each item's source-backed model-selection rationale and ordering
    explanation as `plannerEvidence` and `orderReason` in the validated delivery
    entry. The worker must receive those with the exact candidate mapping.
 
@@ -234,7 +244,10 @@ the parent itself cannot spawn this direct Boards child.
 Before spawning any worker, present the complete validated plan in its planned
 order. For every work item, include its ID, type, title, planned candidate ID,
 resolved model and supported reasoning effort (or `unset` when the model has
-no effort setting), and order reason. For a built-in profile, include the
+no effort setting), and order reason. Also show the independently selected
+review candidate, exact model/effort, and review rationale for both axes;
+confirmation covers both implementation and review profiles. For a built-in
+implementation profile, include the
 pre-start capacity fallback profile if one exists; for an additional candidate,
 show that no fallback is defined. Claude Code and Cursor have no built-in
 pre-start fallback, so omit that column there.
@@ -273,8 +286,9 @@ the returned JSON, but must not inspect the code itself to author findings or
 silently downgrade a review result.
 
 On Claude Code, this entire post-confirmation loop runs as one `Workflow`
-script. Pass `validatedPlan` entries with `plannedCandidate`, `plannerEvidence`,
-and `orderReason`, plus the validated invocation-local map as
+script. Pass `validatedPlan` entries with `plannedCandidate`, `reviewCandidate`,
+`reviewEvidence`, `plannerEvidence`, and `orderReason`, plus the validated
+invocation-local map as
 `additionalCandidates` when present. The
 script resolves built-in IDs from its registry and additional IDs only from
 that map. It calls `agent()` directly for every child, uses
@@ -382,9 +396,11 @@ commit as `expectedParent` for round 2.
 Give both workers the work-item scope, acceptance evidence, and
 [the flat worker contract](references/flat-review-worker.md). They must return
 the contract's JSON without editing code, Git, Boards, or spawning children.
-Use the shared host-specific helper-agent profile above; on Claude Code use
-`agent(prompt, {model: 'haiku', effort: 'low', label})` for both axes. On
-Cursor, use `composer2.5` without an effort field for both axes.
+Resolve the item's confirmed `reviewCandidate` and dispatch both independent
+axes with its exact model and reasoning effort. Preserve this review profile
+through repair rounds; implementation effort escalation does not change it.
+Record the review candidate, resolved mapping, and review rationale in the
+delivery summary. A different review profile requires a revised approved plan.
 
 Validate both axis labels, the fixed point, the reviewed head and its parent,
 and the non-empty diff before

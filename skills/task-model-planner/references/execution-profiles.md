@@ -83,3 +83,36 @@ deeper implementation reasoning remains. For Cursor, choose a host-configured
 built-in profile or a parent-supplied candidate validated for this invocation.
 Treat `xhigh` profiles as exceptions and apply the gates in `../SKILL.md`
 before selecting one.
+
+## Review candidates
+
+Review selection is independent of implementation selection and Boards helper
+routing. Every new plan must recommend one `reviewCandidate` and a source-backed
+`reviewEvidence` rationale per item; the user confirms that profile for both
+independent review axes. There is no automatic cheap-helper review default.
+
+For Codex/ChatGPT, the complete review pool is:
+
+| Review candidate ID | Model | Reasoning effort |
+|---|---|---|
+| `luna-max` | `gpt-6-luna` | `max` |
+| `sol-medium` | `gpt-6.1-sol` | `medium` |
+| `sol-high` | `gpt-6.1-sol` | `high` |
+
+These exact pairs are supported by the active Codex host metadata. User wording
+“6.0 luma max” maps to the host identifier `gpt-6-luna` with `max`; it does not
+create a `luma` alias. Availability must still be rechecked when planning.
+The implementation-only qualified-Luna gates do not define review suitability:
+assess review failure cost, reasoning hazards, verification coverage, and current
+evaluation evidence independently. A future explicitly approved `luna-max`
+review selection is allowed. Boards operations use Luna/high as specified
+by the orchestrator.
+
+On Claude Code, retain `haiku-low` (`haiku`, `low`) as the existing review
+choice alongside its built-in profiles above. On Cursor, retain `composer2.5`
+(with effort unset) as the existing review choice alongside its built-in
+profiles above. Plan and confirm their review choice independently; the Codex
+pool does not change these host mappings. Run-scoped implementation additions
+do not automatically expand the review pool. Review
+profiles have no automatic capacity fallback: report an unavailable approved
+profile rather than silently changing the review configuration.
