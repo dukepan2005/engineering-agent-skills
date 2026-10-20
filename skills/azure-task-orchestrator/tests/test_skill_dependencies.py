@@ -471,7 +471,7 @@ async function run(reviewCandidate, reviewEvidence = 'Bounded reviewer contract'
   const agent = async (prompt, options) => {
     calls.push(options);
     if (options.label.startsWith('preflight_')) return {rev:1};
-    if (options.label.startsWith('closeout_')) return {closed:true};
+    if (options.label.startsWith('closeout_')) return {mode:'applied',id:123};
     if (options.label.startsWith('review_')) {
       const round = options.label.split('_')[1];
       const axis = options.label.includes('_standards_') ? 'standards' : 'spec';

@@ -80,7 +80,8 @@ Omit `--global` to install into the current project instead. Omit the explicit
 Invoke `$azure-devops-boards-skill` when reading or changing Azure Boards work
 items. The Skill validates every mutation before it applies it; see its
 [dedicated guide](skills/azure-devops-boards-skill/README.md) for prerequisites
-and command examples.
+and command examples. The helper also supports `update --tags` to merge tags
+while preserving the work item's existing tags.
 
 ### Azure Task delivery
 
@@ -103,8 +104,10 @@ work item the parent controls a flat sequence:
    item and returns a structured scope snapshot.
 2. **Implement** (planner-specified model) — runs `$azure-task-implement` in
    `reviewOwner=parent` mode for code, tests, and one task commit.
-3. **Review** (two cheap workers in parallel) — runs the Standards and Spec
-   axes without allowing either worker to spawn children.
+3. **Review** (two workers using the confirmed review profile) — runs the
+   Standards and Spec axes in parallel without allowing either worker to spawn
+   children. Review selection is independent of implementation; cost depends
+   on the review profile's model and reasoning effort.
 4. **Repair and review** — if round one finds issues, creates a separate repair
    commit and reviews the full task delta once more. Two dual-axis rounds
    maximum; remaining findings stop the run for human direction. A clean first
@@ -178,8 +181,8 @@ and the planning Skill never edits code or Git state itself.
 
 ## Development
 
-- Keep reusable agent instructions in `SKILL.md`; keep human-facing catalog and
-  installation guidance here.
+- Keep reusable agent instructions in `SKILL.md` or supporting references
+  linked from it; keep human-facing catalog and installation guidance here.
 - Run the applicable skill validation before committing.
 - Run `python3 -m unittest discover -s skills/azure-devops-boards-skill/tests`
   after changes to the Azure Boards helper.

@@ -16,9 +16,11 @@ Core principle: the commit message is the author's claim, the diff is the fact, 
 | Input | Meaning | Main commands |
 |---|---|---|
 | one rev (`abc1234`, `HEAD~1`, tag, branch) | single commit | `git show <rev> --stat`, then the full `git show <rev>` |
-| `a..b` or `a...b` | commit range: what b has that a lacks | `git log --oneline a..b` (list commits), `git diff a..b --stat` (combined effect) |
-| two revs separated by space (`a b`) | direct diff between two points | same as range; note this in the report |
+| `a..b` | direct comparison of the two snapshots | `git log --oneline a..b` (b-only commits), `git diff a..b --stat` |
+| `a...b` | changes from a and b's merge base (common ancestor) to b | `git log --oneline a..b` (b-only commits), `git diff a...b --stat` |
+| two revs separated by space (`a b`) | direct diff between two points | `git diff a b --stat`; note this in the report |
 
+- Preserve the selected two-dot or three-dot form when reading the full diff.
 - For a range, report the change **as one whole** grouped by concern. List the commits involved, but do NOT write one report per commit.
 - Ambiguous or unreachable rev: ask the user instead of guessing.
 

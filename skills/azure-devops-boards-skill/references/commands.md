@@ -76,6 +76,8 @@ sh "$HELPER" update \
 
 sh "$HELPER" update --id 123 --assigned-to 'person@example.com'
 
+sh "$HELPER" update --id 123 --tags ready-for-agent --tags reviewed
+
 sh "$HELPER" add-comment \
   --id 123 --comment-file /tmp/comment.md
 
@@ -113,6 +115,10 @@ record. The helper checks the resolved identity's `uniqueName` case-insensitivel
 during validation and persisted read-back. Blank input is rejected; this option
 does not clear an assignment.
 
+`update --tags TAG` merges tags into the existing list without replacing it.
+Repeat the option for multiple tags; exact existing tag values are not added
+again.
+
 `update --expected-rev REV` optionally binds an update to the revision used to
 prepare its inputs. REV must be a positive integer. When supplied, the helper
 reads the current item and stops before validation if its revision differs; the
@@ -134,6 +140,12 @@ real Discussion comment. The Bug-specific flags are rejected for non-Bug work
 items. Use comments for supplemental context. Repro Steps and System Info inputs
 are stored verbatim as Markdown with field-specific `multilineFieldsFormat=markdown`
 metadata. The same two flags are accepted by `update` for an existing Bug.
+
+If an initial creation-time comment fails after the work item is created,
+`create` emits `mode: "partial"` with the created `id`, `rev`,
+`failedStep: "add-comment"`, and the error, then exits with a failure. Inspect
+that item's comments before using `add-comment` to recover; rerunning `create`
+can create a duplicate work item.
 
 ## Search existing work items safely
 

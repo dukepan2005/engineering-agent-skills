@@ -71,6 +71,42 @@ class CreateCommandTests(unittest.TestCase):
         self.assertEqual(out, {"mode": "applied", "id": 1000, "rev": 2})
         self.assertEqual(fake.applies, 1)
 
+    def test_initial_comment_is_validated_or_persisted_with_creation(self):
+        for apply in (False, True):
+            with self.subTest(apply=apply):
+                fake = FakeClient()
+                args = self._args(apply=apply)
+                args.comment_file = _file("initial context")
+                out = _run(create, fake, args)
+                self.assertEqual(out["mode"], "applied" if apply else "validated")
+                self.assertEqual(fake.applies, int(apply))
+                if apply:
+                    self.assertEqual(out["commentId"], 1)
+                    self.assertEqual(fake.comments[out["id"]][0]["text"], "initial context")
+                else:
+                    self.assertEqual(fake.comments, {})
+
+    def test_initial_comment_failure_reports_created_item_without_claiming_success(self):
+        for response in (RuntimeError("comment unavailable"), None,
+                         {"format": "html", "text": "initial context"},
+                         {"format": "markdown", "text": "wrong context"}):
+            with self.subTest(response=response):
+                fake = FakeClient()
+                args = self._args(apply=True)
+                args.comment_file = _file("initial context")
+                failure = {"side_effect": response} if isinstance(response, Exception) else {"return_value": response}
+                with redirect_stdout(io.StringIO()) as output, \
+                        mock.patch("azure_devops_boards.connect", return_value=(fake, PatchOp)), \
+                        mock.patch.object(fake, "add_comment", **failure):
+                    with self.assertRaisesRegex(RuntimeError, "Work item 1000 was created"):
+                        create(args)
+                result = json.loads(output.getvalue())
+                self.assertEqual((result["mode"], result["id"], result["rev"]), ("partial", 1000, 2))
+                self.assertEqual(result["failedStep"], "add-comment")
+                self.assertTrue(result["error"])
+                self.assertEqual(fake.applies, 1)
+                self.assertEqual(fake.read(result["id"])["fields"]["System.Title"], "T")
+
     def test_task_creation_writes_acceptance_criteria_separately(self):
         fake = FakeClient()
         args = self._args(apply=True)

@@ -508,11 +508,10 @@ def create(args):
         document.append(op(cls, "add", f"/multilineFieldsFormat/{ACCEPTANCE_CRITERIA_FIELD}", "markdown"))
         expected_fields[ACCEPTANCE_CRITERIA_FIELD] = value
         expected_formats[ACCEPTANCE_CRITERIA_FIELD] = "markdown"
-    for option, field_name in (
-        ("repro_steps_file", "Microsoft.VSTS.TCM.ReproSteps"),
-        ("system_info_file", "Microsoft.VSTS.TCM.SystemInfo"),
+    for value_file, field_name in (
+        (repro_steps_file, "Microsoft.VSTS.TCM.ReproSteps"),
+        (system_info_file, "Microsoft.VSTS.TCM.SystemInfo"),
     ):
-        value_file = locals()[option]
         if value_file is not None:
             value = _read_markdown_field(value_file, field_name)
             document.append(op(cls, "add", f"/fields/{field_name}", value))
@@ -537,10 +536,17 @@ def create(args):
             output["comment"] = {"format": "markdown", "length": len(initial_comment)}
         return emit(output)
     if initial_comment is not None:
-        saved = client.add_comment(result["id"], initial_comment)
-        if saved is None or saved.get("format", "").lower() != "markdown" or html.unescape(saved.get("text", "")) != initial_comment:
-            raise RuntimeError("Markdown comment did not persist after work-item creation.")
-        result["commentId"] = _comment_id(saved)
+        try:
+            saved = client.add_comment(result["id"], initial_comment)
+            if saved is None or saved.get("format", "").lower() != "markdown" or html.unescape(saved.get("text", "")) != initial_comment:
+                raise RuntimeError("Markdown comment did not persist after work-item creation.")
+            result["commentId"] = _comment_id(saved)
+        except Exception as error:
+            emit({**result, "mode": "partial", "failedStep": "add-comment", "error": str(error)})
+            raise RuntimeError(
+                f"Work item {result['id']} was created, but its initial comment failed. "
+                "Do not rerun create; inspect its comments before using add-comment to recover."
+            ) from error
     emit(result)
 
 

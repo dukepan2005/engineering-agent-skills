@@ -417,7 +417,8 @@ delta, rerun verification, and create one separate task-only repair commit on
 top of the implementation commit; it must not invoke `$code-review`, spawn a
 child, or perform Boards operations. Validate the repair commit's parent is
 the prior task commit and `reviewBase` is unchanged. If the repair fails, stop.
-After a successful repair, run review
+After a successful repair, give both review workers the complete first-round
+reports, including the original findings, and run review
 round 2 against the resulting `reviewBase...HEAD` delta. A clean
 round 2 permits closeout. If round 2 still has any findings, return
 `review_action_required` with the reports and remaining findings, then stop:
@@ -480,7 +481,9 @@ Return the JSON output unchanged. Do not use `--check-ac`, and do not perform
 any non-Boards work.
 ```
 
-Collect the closeout result. If the closeout fails because the expected rev is
+Parse the closeout JSON and require `mode: "applied"` with the expected numeric
+work-item `id` before recording completion. Validation-only, malformed, failed,
+or wrong-item results stop the sequence. If the closeout fails because the expected rev is
 stale, stop immediately; do not retry automatically. The work item changed
 since preflight, so the current item must be re-preflighted and the
 implementation result reconciled before closeout is attempted again. Do not

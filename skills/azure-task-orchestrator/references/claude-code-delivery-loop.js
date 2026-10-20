@@ -144,9 +144,13 @@ function parseReview(value, axis, reviewBase, head, expectedParent, label) {
     throw new Error('Standards review cannot use no_spec_available')
   }
   if (!Array.isArray(result.findings)) throw new Error(`${label} findings must be an array`)
+  if ((result.status === 'findings') !== (result.findings.length > 0)) {
+    throw new Error(`${label} status must agree with its findings array`)
+  }
   for (const finding of result.findings) {
-    if (!finding.priority || !finding.location || !finding.summary || !finding.evidence) {
-      throw new Error(`${label} finding is missing priority, location, summary, or evidence`)
+    if (!['P0', 'P1', 'P2', 'P3'].includes(finding?.priority)
+      || !finding.location || !finding.summary || !finding.evidence) {
+      throw new Error(`${label} finding requires a P0–P3 priority, location, summary, and evidence`)
     }
   }
   return result
@@ -166,7 +170,16 @@ function parsePreflight(value, itemId) {
   return result
 }
 
-async function runReviewRound({ item, implementation, preflightData, round, expectedParent }) {
+function parseCloseout(value, itemId) {
+  const result = parseJson(value, `closeout ${itemId}`)
+  const expectedId = Number(String(itemId).replace(/^AB#/, ''))
+  if (!result || result.mode !== 'applied' || result.id !== expectedId) {
+    throw new Error(`closeout ${itemId} must return mode applied for work item ${expectedId}`)
+  }
+  return result
+}
+
+async function runReviewRound({ item, implementation, preflightData, round, expectedParent, previousReports }) {
   phase(`Review ${round}`)
   const fixedPoint = implementation.reviewBase
   const head = implementation.commit
@@ -182,6 +195,10 @@ ${JSON.stringify(preflightData, null, 2)}
 
 Implementation summary:
 ${JSON.stringify(implementation, null, 2)}
+${round > 1 ? `
+First-round review reports (including the original repair findings):
+${JSON.stringify(previousReports, null, 2)}
+` : ''}
 `
   const prompt = (axis) => `reviewAxis: ${axis.toLowerCase()}
 Use the flat review worker contract at
@@ -209,10 +226,6 @@ async function runRepair({ item, implementation, preflightData, reports, candida
   phase(label)
   const candidate = resolveCandidate(candidateId)
   const candidateMapping = describeCandidate(candidateId)
-  const findings = reports.flatMap((report) => report.findings.map((finding) => ({
-    ...finding,
-    axis: report.axis,
-  })))
   const result = await agent(
     `Use \`$azure-task-implement\` with \`reviewOwner=parent\` in ${label} mode for
 work item ${item.id}. Preserve user-owned changes, the original reviewBase, and
@@ -236,9 +249,9 @@ Preflight scope:
 ${JSON.stringify(preflightData, null, 2)}
 \`\`\`
 
-Review findings:
+Complete first-round review reports:
 \`\`\`json
-${JSON.stringify(findings, null, 2)}
+${JSON.stringify(reports, null, 2)}
 \`\`\``,
     agentOptions(candidate, `${label}_${item.id}`)
   )
@@ -342,7 +355,7 @@ ${JSON.stringify(preflightData, null, 2)}
       }
       repairCommit = repaired.commit
       implementation = repaired
-      const secondReview = await runReviewRound({ item, implementation, preflightData, round: 2, expectedParent: implementationCommit })
+      const secondReview = await runReviewRound({ item, implementation, preflightData, round: 2, expectedParent: implementationCommit, previousReports: firstReview })
       reviewRounds.push(secondReview)
       if (hasFindings(secondReview)) {
         const remainingFindings = secondReview.flatMap((report) =>
@@ -358,14 +371,13 @@ ${JSON.stringify(preflightData, null, 2)}
     phase('Closeout')
     const implementationSummary = JSON.stringify({ implementationCommit, repairCommit, implementation, reviewRounds, reviewCandidate, reviewEvidence, reviewMapping: describeReviewCandidate(reviewCandidate) })
     const preflightRev = preflightData.rev || preflightData.revision || 'unknown'
-    const closeoutResult = await agent(
+    const closeoutResult = parseCloseout(await agent(
       `Use \`$azure-devops-boards-skill\` in its semantic \`task-boards-ops\` role. Read the current full work item with \`show ${boardsConnectionArgs} --full --id ${itemId}\`. Read Acceptance Criteria from \`Microsoft.VSTS.Common.AcceptanceCriteria\`, separately from Description. Apply only evidence-backed Markdown checklist changes specified by the implementation and review summary, preserving all other Acceptance Criteria and Description content. Write the resulting Acceptance Criteria to \`/tmp/acceptance_criteria_${itemId}.md\` and a Markdown completion comment to \`/tmp/comment_${itemId}.md\`. Then run \`close-task --apply ${boardsConnectionArgs} --id ${itemId} --expected-rev ${preflightRev} --state Closed --acceptance-criteria-file /tmp/acceptance_criteria_${itemId}.md --comment-file /tmp/comment_${itemId}.md\`. Return the JSON output unchanged. Do not use \`--check-ac\`, and do not perform any non-Boards work.
 
 Implementation and flat review summary:
 ${implementationSummary}`,
       { model: 'haiku', effort: 'low', label: `closeout_${itemId}` }
-    )
-    if (!closeoutResult) throw new Error('closeout child returned null')
+    ), itemId)
 
     log(`✓ Completed ${itemId}`)
     results.push({

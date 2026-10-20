@@ -79,8 +79,9 @@ Return JSON only:
 ```
 
 `axis` must match the requested axis; `reviewBase`, `head`, and `parent` must
-match their supplied expected values. Use `status: "findings"` when findings exist and
-`status: "no_spec_available"` only for the Spec axis. Every finding must
+match their supplied expected values. Use `status: "findings"` with a non-empty
+findings array; `clean` and `no_spec_available` require an empty array.
+Use `status: "no_spec_available"` only for the Spec axis. Every finding must
 include `priority` (`P0`–`P3`), `location`, `summary`, and `evidence`; set
 `blocking: true` only for a P0/P1 or an explicitly blocking correctness,
 security, data-loss, or verification problem. A malformed result, mismatched
