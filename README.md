@@ -11,6 +11,7 @@ Codex, Claude Code, and Cursor.
 |---|---|
 | [`azure-devops-boards-skill`](skills/azure-devops-boards-skill/) | Safely read and mutate Azure DevOps Boards work items through the locally authenticated Azure CLI. |
 | [`azure-task-implement`](skills/azure-task-implement/) | Implement code from a provided specification or ticket scope. |
+| [`build-artifact-cleanup`](skills/build-artifact-cleanup/) | Inventory and clean generated FlowCoach iOS and Go API build/test artifacts from one shared script. |
 | `task-boards-ops` | Semantic role for a Boards-only helper: Codex/ChatGPT use GPT-6 Luna high, falling back to GPT-6 Sol medium; Claude Code uses Haiku low; Cursor uses Composer 2.5 with effort unset. Claude Code may optionally provide the [named agent](.claude/agents/task-boards-ops.md). |
 | [`task-model-planner`](skills/task-model-planner/) | Recommend one source-backed, lowest-cost reliable execution candidate from a parent-provided work-item snapshot and linked specification authority. |
 | [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver implementation-ready Azure Boards work items from a Story or an explicit item set with parent-owned flat implementation, two-axis review, repair, and closeout workers. |
