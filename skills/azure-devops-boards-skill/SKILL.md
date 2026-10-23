@@ -43,6 +43,11 @@ work-item id. Branch, commit, and pull request artifacts are not helper
 operations. Do not invent a `branch-link` subcommand, and do not push the
 Azure DevOps git remote to create one.
 
+For an explicitly authorized cross-project work-item move, use the helper's
+single-item `move` command documented in `references/commands.md`. Do not
+recreate items to simulate a move; preserve IDs and verify content and native
+relations after each applied move.
+
 ## Boards child mode: execute the local helper
 
 When the current prompt already assigns the semantic `task-boards-ops` role,

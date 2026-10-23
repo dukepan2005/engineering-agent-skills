@@ -78,6 +78,11 @@ sh "$HELPER" update --id 123 --assigned-to 'person@example.com'
 
 sh "$HELPER" update --id 123 --tags ready-for-agent --tags reviewed
 
+sh "$HELPER" move --organization "$AZURE_DEVOPS_ORG" \
+  --source-project OldProject --target-project NewProject --id 123 \
+  --target-area-path 'NewProject\Team' \
+  --target-iteration-path 'NewProject\Sprint 4' --expected-rev 8
+
 sh "$HELPER" add-comment \
   --id 123 --comment-file /tmp/comment.md
 
@@ -118,6 +123,23 @@ does not clear an assignment.
 `update --tags TAG` merges tags into the existing list without replacing it.
 Repeat the option for multiple tags; exact existing tag values are not added
 again.
+
+`move` is the native, single-item cross-project move. It reads the item from
+`--source-project`, requires its live revision to equal `--expected-rev`, then
+validates a `/rev`-guarded patch through the target project. The patch sets
+`System.TeamProject`, `System.AreaPath`, and `System.IterationPath` to the
+explicit target values. Target Area Path and a concrete Target Iteration Path
+must be inside the target project; the project root is not a concrete Sprint.
+Without `--apply`, the command only runs Azure's `validateOnly` request and
+prints `mode: validated`. To apply, repeat the same business arguments and add
+`--apply`; the helper validates again, applies once with the same `/rev` test,
+and reads the item back. It checks the three target fields, all other fields,
+multiline formats, and native relationships; Azure-managed `System.AuthorizedDate`,
+`System.BoardColumn`, `System.BoardColumnDone`, and `WEF_*_System.ExtensionMarker`
+metadata may disappear during the move. A stale revision or any
+validation/read-back failure stops immediately; the helper never retries or
+rolls back a move that Azure already applied. Move one item per command and
+re-read related work items when moving a hierarchy or dependency set.
 
 `update --expected-rev REV` optionally binds an update to the revision used to
 prepare its inputs. REV must be a positive integer. When supplied, the helper
