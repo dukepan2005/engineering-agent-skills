@@ -89,11 +89,15 @@ When the caller selects `reviewOwner=self`, after implementation and the
 task-only commit, run a dual-axis `$code-review`. If the first review is clean,
 proceed directly to Boards closeout; do not run an unneeded second review. If
 it reports findings, repair them, rerun relevant verification, create a separate
-repair commit whose parent is the implementation commit, and run the second
-dual-axis review against the same `reviewBase...HEAD` delta. Two review
-rounds is the maximum. If the second review still reports any findings, stop
-without closeout and return the findings for human direction. A failed or
-malformed review is never clean and also stops the workflow. Return:
+repair commit, and run review round 2 against the same `reviewBase...HEAD`
+delta. If round 2 still reports findings, raise the implementation/repair
+`reasoning_effort` by one supported level while keeping the same model, then
+make one final repair commit and run review round 3. Keep the review model and
+effort from the approved plan unchanged. If round 3 still reports findings,
+stop without closeout and return them for human direction. If no higher
+supported implementation effort is available after round 2, stop and return
+the findings for human direction without attempting an unsupported spawn. A
+failed or malformed review is never clean and also stops the workflow. Return:
 
 ```json
 {
@@ -104,7 +108,7 @@ malformed review is never clean and also stops the workflow. Return:
 }
 ```
 
-When either review round is clean, close the work item through
+When any review round is clean, close the work item through
 `$azure-devops-boards-skill` in its semantic `task-boards-ops` role. Map every
 Acceptance criterion to concrete current-code evidence. For Task/Bug items,
 update only supported checklist markers in the native
@@ -120,8 +124,13 @@ concrete blocker rather than claiming completion.
 
 ## Parent-owned review-owner=parent mode
 
-The parent owns both review rounds and Boards closeout. Run at most two
-dual-axis rounds: if round one is clean, the parent may close out immediately;
-if it has findings, repair and run round two; if round two still has any
-findings, stop for human direction. After implementation, return
-`ready_for_review` as specified above. Do not close the work item in this mode.
+The parent owns review dispatch, repair, aggregation, and Boards closeout. Run
+at most three dual-axis rounds: if round one is clean, the parent may close out
+immediately; if it has findings, repair and run round two; if round two still
+has findings, the parent raises the implementation/repair `reasoning_effort`
+by one supported level while keeping the same model, then runs one final repair
+and review round. Keep the approved review model and effort unchanged. If round
+three still has findings, or no higher supported implementation effort is
+available after round two, stop for human direction. After implementation,
+return `ready_for_review` as specified above. Do not close the work item in
+this mode.
