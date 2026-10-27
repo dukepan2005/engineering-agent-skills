@@ -1,10 +1,11 @@
 # Azure DevOps Boards Skill
 
-An [Agent Skills](https://agentskills.io/) package for safely managing Azure DevOps Boards work items from Codex, Claude Code, and other compatible agent hosts.
+An [Agent Skills](https://agentskills.io/) package for safely managing Azure DevOps Boards work items from Codex, Claude Code, Cursor, and other compatible agent hosts.
 
 It provides a shared, project-neutral implementation for:
 
 - Reading work items and the current team Sprint
+- Searching work items by title within one explicitly selected project; the returned result count is capped with `$top`, quoted/control-character keywords are rejected, and missing IDs in summary read-back cause failure
 - Creating Epics, Features, User Stories, Tasks, and Bugs
 - Updating descriptions, workflow states, and iterations
 - Posting comments with explicit Markdown format
@@ -20,7 +21,14 @@ Mutating commands validate server-side, apply, and verify the persisted read-bac
 
 Updates use Azure DevOps work-item revisions for optimistic concurrency: a stale revision fails the mutation immediately, with no automatic retry. Descriptions and comments are verified as Markdown, and persisted fields or relations are read back before success is reported.
 
-The close flow sets the terminal state and posts one completion comment; it does not read or rewrite the Description. `close-task --check-ac` remains available as an opt-in that checks matching acceptance-criteria checkboxes server-side, but the default close path does not use it — acceptance status goes in the comment. The Skill does not decide which acceptance criteria have been satisfied.
+Task and Bug Acceptance Criteria belong in the separate native
+`Microsoft.VSTS.Common.AcceptanceCriteria` field; keep them out of Description.
+At closeout, update only checklist items backed by implementation evidence and
+preserve Description. `close-task --acceptance-criteria-file` writes the native
+field, while `--check-ac` checks its Markdown boxes server-side. Either can be
+combined with `--description-file`; the two Acceptance Criteria options are
+mutually exclusive. The Skill does not decide which criteria have been
+satisfied.
 
 The helper uses the locally authenticated Azure CLI SDK. It does not accept, read, or print a personal access token.
 
@@ -87,6 +95,9 @@ Read operations execute immediately:
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" current-sprint
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" show --id 61               # compact summary
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" show --id 61 --full        # raw Azure JSON
+sh "$SKILL_DIR/scripts/azure-devops-boards.sh" search \
+  --organization https://dev.azure.com/example --project ExampleProject \
+  --title-contains plan --type "User Story" --limit 20
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" implement-preflight --id 61
 ```
 
@@ -98,7 +109,8 @@ and verifies the persisted read-back in that one call:
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" create --apply \
   --type Task \
   --title 'Implement contract' \
-  --description-file /tmp/task.md \
+  --description-file /tmp/task-description.md \
+  --acceptance-criteria-file /tmp/task-ac.md \
   --tags ready-for-agent \
   --parent 61
 
@@ -116,6 +128,12 @@ For a high-risk change, or when a human should review before the write, omit
 `--apply` first to validate only, then repeat the identical command with
 `--apply`.
 
+Bug Repro Steps and System Info support Markdown. Their `--repro-steps-file`
+and `--system-info-file` inputs are stored verbatim with each field's
+`multilineFieldsFormat=markdown` metadata, on both `create` and `update`.
+Task and Bug Acceptance Criteria use `--acceptance-criteria-file` on `create`
+and `update`, stored in the native field with the same Markdown metadata.
+
 For `predecessor`, the target work item blocks the current work item. For `parent`, the target is the current work item's parent. Re-adding an existing relation returns `unchanged`.
 
 For an implementation Task, use one compact preflight snapshot before editing,
@@ -123,22 +141,26 @@ then one closeout command at the end:
 
 ```bash
 sh "$SKILL_DIR/scripts/azure-devops-boards.sh" close-task --apply \
-  --id 123 --expected-rev 8 --state Closed --comment-file /tmp/completion.md
+  --id 123 --expected-rev 8 --state Closed \
+  --acceptance-criteria-file /tmp/acceptance-criteria.md \
+  --comment-file /tmp/completion.md
 ```
 
-`close-task` sets the terminal state and posts one Markdown completion comment
-in a single call; it does not read or rewrite the Description. (`--check-ac
-all|FRAGMENT` remains an opt-in that checks matching acceptance-criteria
-checkboxes in the live Description server-side, without unchecking any that are
-already done.) `implement-preflight` retains structured acceptance criteria, or
-falls back to the complete Description when it cannot safely identify them. The
-close call verifies both persisted results. The two Azure operations remain
-separately verified rather than being presented as an atomic transaction. A
-stale revision fails the mutation immediately, with no automatic retry.
+`close-task` can update native Acceptance Criteria, Description, and terminal
+state, then post one Markdown completion comment in a single call. The caller
+must preserve Description and mark only evidence-backed criteria in the native
+field. `--check-ac all|FRAGMENT` is an opt-in alternative to
+`--acceptance-criteria-file`; either can be combined with `--description-file`.
+`implement-preflight` returns the native Acceptance Criteria field separately
+from Description. The close call verifies the persisted fields. The two Azure
+operations remain separately verified rather than being presented as an atomic
+transaction. A stale revision fails the mutation immediately, with no automatic
+retry. File-based `close-task` updates require `--expected-rev` from the
+revision used to prepare the file.
 
 ## Workflow integration
 
-The Skill description explicitly covers `/to-spec`, `/to-tickets`, `/implement`, and other workflows that publish or update Azure DevOps work items. For deterministic routing, projects should also state in their `AGENTS.md` (Codex) or `CLAUDE.md` (Claude Code) instructions that Azure Boards operations must use this Skill instead of reimplementing REST, CLI, or SDK orchestration.
+The Skill description explicitly covers `/to-spec`, `/to-tickets`, `/implement`, and other workflows that publish or update Azure DevOps work items. For deterministic routing, projects should also state in their `AGENTS.md` (Codex), `CLAUDE.md` (Claude Code), or Cursor project rules that Azure Boards operations must use this Skill instead of reimplementing REST, CLI, or SDK orchestration.
 
 ## Scope
 

@@ -4,7 +4,7 @@
 port. It models the Azure behaviours the safety checks depend on:
 
 - ``validateOnly=true`` projects the would-be item. Tests can model Azure update
-  responses that omit relation projections;
+  responses that omit Description/Markdown or relation projections;
 - ``System.Description`` is HTML-escaped (``&``, ``<``, ``>``) on output — the
   regression in commit b9232a0;
 - ``/rev`` is honoured for optimistic concurrency.
@@ -23,12 +23,15 @@ class PatchOp:
 class FakeClient:
     """In-memory adapter implementing the runner's validate/apply/read port."""
 
-    def __init__(self, items=None, echo_relations_on_validate=True):
+    def __init__(self, items=None, echo_relations_on_validate=True,
+                 echo_description_on_existing_validate=True):
         self.items = {k: copy.deepcopy(v) for k, v in (items or {}).items()}
         self.comments = {}
         self._next, self._next_comment = 1000, 1
+        self.validate_calls = 0
         self.applies = 0
         self.echo_relations_on_validate = echo_relations_on_validate
+        self.echo_description_on_existing_validate = echo_description_on_existing_validate
 
     @staticmethod
     def blank(item_type):
@@ -50,6 +53,9 @@ class FakeClient:
                 if item.get("rev") != o.value:
                     raise RuntimeError("rev mismatch (optimistic concurrency)")
                 continue
+            if o.op == "remove" and o.path.startswith("/relations/"):
+                del item["relations"][int(o.path.rsplit("/", 1)[-1])]
+                continue
             if o.op != "add":
                 continue
             if o.path.startswith("/fields/"):
@@ -62,8 +68,18 @@ class FakeClient:
         return item
 
     def validate(self, document, target):
+        self.validate_calls += 1
         base = self.blank(target.item_type) if self._is_new(target) else self.items[target.item_id]
         projected = self._apply(base, document)
+        if not self._is_new(target) and not self.echo_description_on_existing_validate:
+            if "System.Description" in base["fields"]:
+                projected["fields"]["System.Description"] = base["fields"]["System.Description"]
+            else:
+                projected["fields"].pop("System.Description", None)
+            if "System.Description" in base["multilineFieldsFormat"]:
+                projected["multilineFieldsFormat"]["System.Description"] = base["multilineFieldsFormat"]["System.Description"]
+            else:
+                projected["multilineFieldsFormat"].pop("System.Description", None)
         if not self.echo_relations_on_validate:
             projected["relations"] = []
         return projected
@@ -83,6 +99,28 @@ class FakeClient:
 
     def read(self, item_id):
         return copy.deepcopy(self.items[item_id])
+
+    def read_comments(self, work_item_id):
+        return copy.deepcopy(self.comments.get(work_item_id, []))
+
+    def new_direct_implementation_children(self, story_id):
+        children = []
+        seen = set()
+        for relation in self.items[story_id].get("relations", []):
+            if relation.get("rel") != "System.LinkTypes.Hierarchy-Forward":
+                continue
+            target = relation.get("url", "").rsplit("/", 1)[-1]
+            if not target.isdigit():
+                continue
+            item = self.items[int(target)]
+            fields = item.get("fields", {})
+            target_id = int(target)
+            if (fields.get("System.State") == "New"
+                    and fields.get("System.WorkItemType") in ("Task", "Bug")
+                    and target_id not in seen):
+                seen.add(target_id)
+                children.append(target_id)
+        return children
 
     def add_comment(self, work_item_id, text):
         comment_id = self._next_comment; self._next_comment += 1

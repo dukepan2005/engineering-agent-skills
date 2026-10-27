@@ -2,7 +2,8 @@
 
 Reusable, host-neutral agent skills for reliable software delivery. The skills
 work with compatible hosts such as Codex and Claude Code; each skill defines
-its own triggering and runtime instructions.
+its own triggering and runtime instructions. Supported host examples include
+Codex, Claude Code, and Cursor.
 
 ## Catalog
 
@@ -10,19 +11,30 @@ its own triggering and runtime instructions.
 |---|---|
 | [`azure-devops-boards-skill`](skills/azure-devops-boards-skill/) | Safely read and mutate Azure DevOps Boards work items through the locally authenticated Azure CLI. |
 | [`azure-task-implement`](skills/azure-task-implement/) | Implement code from a provided specification or ticket scope. |
-| `task-boards-ops` | Semantic role for a cheap Boards-only child (Haiku or gpt-5.6-luna, low reasoning). Claude Code may optionally provide the [named agent](.claude/agents/task-boards-ops.md). |
-| [`task-model-planner`](skills/task-model-planner/) | Recommend one named, lowest-reliable execution profile for each work item. |
-| [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver implementation-ready Azure Boards work items from a Story or an explicit item set: preflight via cheap agent, implement via named-profile agent, closeout via cheap agent. |
+| [`build-artifact-cleanup`](skills/build-artifact-cleanup/) | Inventory and clean generated FlowCoach iOS and Go API build/test artifacts from one shared script. |
+| `task-boards-ops` | Semantic role for a Boards-only helper: Codex/ChatGPT use GPT-6 Luna high, falling back to GPT-6 Sol medium; Claude Code uses Haiku low; Cursor uses Composer 2.5 with effort unset. Claude Code may optionally provide the [named agent](.claude/agents/task-boards-ops.md). |
+| [`task-model-planner`](skills/task-model-planner/) | Recommend one source-backed, lowest-cost reliable execution candidate from a parent-provided work-item snapshot and linked specification authority. |
+| [`azure-task-orchestrator`](skills/azure-task-orchestrator/) | Plan and deliver implementation-ready Azure Boards work items from a Story or an explicit item set with parent-owned flat implementation, two-axis review, repair, and closeout workers. |
+| [`explaining-code-changes`](skills/explaining-code-changes/) | Explain a commit or commit range (single SHA, `a..b`, or any git-diff-style revision argument) — what changed, what each piece does, and why — for ordinary/junior developers. |
+| [`testflight-what-to-test`](skills/testflight-what-to-test/) | Write short English TestFlight What to Test notes a tester can read on a phone. |
 
 ## Review Dependency
 
-`azure-task-implement` embeds the local workflow from Matt Pocock's
-`$implement` Skill. It does not require that Skill to be model-invocable. The
-embedded workflow uses `$code-review` before committing, so the host must make
-that Skill available in the same catalog.
+`azure-task-implement` preserves the local implementation workflow from Matt
+Pocock's `$implement` Skill. It supports a standalone `reviewOwner=self` mode
+that keeps the `$code-review` handoff and performs evidence-backed Boards
+closeout after a clean review, and a parent-owned `reviewOwner=parent` mode used
+by the Azure orchestrator. Both allow at most two dual-axis review rounds;
+remaining findings stop for human direction. In the latter mode the
+implementation worker does not spawn review children; the parent launches the
+two review axes directly. The host must make `$code-review` available for
+standalone mode;
+the orchestrator's flat review workers use the bundled axis contract and do not
+invoke the external coordinator.
 
 The orchestrator also requires this repository's `$task-model-planner`,
-`$azure-task-implement`, and `$azure-devops-boards-skill`. It invokes
+`$azure-task-implement`, and `$azure-devops-boards-skill`. The parent
+orchestrator invokes
 dependencies by Skill name, stops when the host reports one unavailable, and
 never requires users to supply installation paths or paste Skill bodies.
 
@@ -69,40 +81,55 @@ Omit `--global` to install into the current project instead. Omit the explicit
 Invoke `$azure-devops-boards-skill` when reading or changing Azure Boards work
 items. The Skill validates every mutation before it applies it; see its
 [dedicated guide](skills/azure-devops-boards-skill/README.md) for prerequisites
-and command examples.
+and command examples. The helper also supports `update --tags` to merge tags
+while preserving the work item's existing tags.
 
 ### Azure Task delivery
 
 The orchestrator handles the full lifecycle of implementation-ready Azure
-Boards work items. It accepts either a Story, whose directly related child items
+Boards work items. It accepts either a Story, whose direct New Task and Bug child items
 it plans and delivers in dependency order, or an explicit item set, including a
 single Task or Bug. It delegates Azure Boards mechanical operations (preflight,
 closeout) to a cheap child in the semantic `task-boards-ops` role and code
-implementation to a planner-specified agent:
+implementation to a candidate-selected agent:
 
 ```text
 $azure-task-orchestrator AB#168
 ```
 
-It runs three sequential subagents per work item:
-1. **Preflight** (cheap model, low reasoning) — reads the Azure Boards work item
-   and returns a structured scope snapshot.
-2. **Implement** (planner-specified model) — follows `$azure-task-implement`'s
-   direct code, test, review, and commit workflow.
-3. **Closeout** (cheap model, low reasoning) — posts the completion comment and
-   closes the work item with optimistic revision checking.
+It first reads one planning snapshot through a direct `task-boards-ops` child,
+then combines that Boards snapshot with any linked specification documents from
+the accepted planning authority to prepare the execution-candidate plan. For each
+work item the parent controls a flat sequence:
+1. **Preflight** (cheap model, low reasoning) — reads the current Azure Boards
+   item and returns a structured scope snapshot.
+2. **Implement** (planner-specified model) — runs `$azure-task-implement` in
+   `reviewOwner=parent` mode for code, tests, and one task commit.
+3. **Review** (two workers using the confirmed review profile) — runs the
+   Standards and Spec axes in parallel without allowing either worker to spawn
+   children. Review selection is independent of implementation; cost depends
+   on the review profile's model and reasoning effort.
+4. **Repair and review** — if round one finds issues, creates a separate repair
+   commit and reviews the full task delta once more. Two dual-axis rounds
+   maximum; remaining findings stop the run for human direction. A clean first
+   or second round proceeds to closeout.
+5. **Closeout** (cheap model, low reasoning) — checks evidence-backed native
+   Acceptance Criteria, preserves Description, posts the completion comment,
+   and closes the work item with optimistic revision checking.
 
 Use `$azure-task-implement` whenever a specification or ticket scope is already
-available and only local implementation work is required. In the three-stage
-Azure delivery flow, the orchestrator supplies that scope to its implementation
-worker.
+available and only local implementation work is required. In the flat Azure
+delivery flow, the orchestrator supplies that scope and explicitly selects
+`reviewOwner=parent`.
 
 #### Dependencies
 
 These wrappers do not bundle or install their review dependency.
 
 - `$azure-task-implement` requires `$code-review` from the same host Skill
-  catalog. It does not require `$implement`.
+  catalog for standalone `reviewOwner=self` use. The orchestrator's flat
+  review workers use their bundled axis contract. It does not require
+  `$implement`.
 - `$azure-task-orchestrator` requires `$task-model-planner`,
   `$azure-task-implement`, and `$azure-devops-boards-skill`.
 
@@ -111,43 +138,52 @@ work item and stops when one is unavailable.
 
 ### Task model planning
 
-Invoke the Skill to plan a Story or an explicit work-item set, including a
-single Task or Bug:
+Invoke the Skill with an authoritative parent-provided snapshot when a separate
+planning pass is needed. The snapshot must include linked specification
+documents when the work-item references require them:
 
 ```text
-$task-model-planner <Story-or-explicit-work-item-set>
+$task-model-planner <parent-provided-snapshot>
 ```
 
-It returns one cost-aware execution-profile ID per work item, plus evidence,
-confidence, and escalation triggers. The planner's bundled registry is the
-single mapping from profile ID to model and reasoning effort.
+It returns one cost-aware execution-candidate ID per work item, plus evidence,
+confidence, and escalation triggers. Built-in IDs resolve through the
+planner's bundled registry; caller-supplied candidates are validated for the
+current host and remain scoped to that invocation.
 
 ### Recommended delivery flow
 
-Always use the orchestrator for full lifecycle delivery:
+Use the orchestrator for full lifecycle delivery; it obtains the Boards
+snapshot before invoking the planner:
 
 ```text
-$task-model-planner <Story-or-explicit-work-item-set>
 $azure-task-orchestrator <Story-or-explicit-work-item-set>
 ```
 
-The orchestrator resolves each profile ID through `$task-model-planner`'s
-canonical registry, then runs three sequential subagents per work item:
-preflight (cheap model), implement (planner-specified model), closeout (cheap
-model). It validates and displays the planner's ordered report, waits for
-explicit user confirmation before dispatching, and stops the sequence on the
-first unsuccessful worker. It never substitutes the parent model or runs work
-items in parallel.
+Users may naturally ask the orchestrator to consider an extra model and
+reasoning strength for the current host, for example: “Also consider another
+model this platform can dispatch at high reasoning effort; verify it first and
+let the plan decide whether it fits.” No structured parameter block is
+required. Without that request, only built-in profiles are considered. The
+orchestrator resolves each built-in profile ID through `$task-model-planner`'s
+canonical registry and each additional candidate ID through the validated
+invocation input, then runs the flat parent-controlled sequence per work item:
+preflight, implementation, two-axis review, repair/review, and closeout. It
+validates and displays the planner's ordered report, waits for explicit user
+confirmation before dispatching, and stops the sequence on the first
+unsuccessful stage. It never substitutes the parent model or runs work items in
+parallel.
 
-`$azure-task-implement` supplies its own implementation workflow and invokes
-`$code-review` by Skill name before commit. The semantic
-`task-boards-ops` role isolates Boards mechanics; the planning Skill never edits
-code, Git state, or Azure Boards.
+`$azure-task-implement` supplies its own implementation workflow. Standalone
+use keeps its self-owned review mode; orchestrated use explicitly selects
+`reviewOwner=parent`, leaving review dispatch to the parent. The semantic
+`task-boards-ops` role isolates Boards mechanics; review workers are read-only,
+and the planning Skill never edits code or Git state itself.
 
 ## Development
 
-- Keep reusable agent instructions in `SKILL.md`; keep human-facing catalog and
-  installation guidance here.
+- Keep reusable agent instructions in `SKILL.md` or supporting references
+  linked from it; keep human-facing catalog and installation guidance here.
 - Run the applicable skill validation before committing.
 - Run `python3 -m unittest discover -s skills/azure-devops-boards-skill/tests`
   after changes to the Azure Boards helper.
