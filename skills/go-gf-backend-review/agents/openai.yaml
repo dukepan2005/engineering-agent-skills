@@ -1,0 +1,4 @@
+interface:
+  display_name: "Go / GoFrame Backend Review"
+  short_description: "Independent Go and GoFrame backend reviews."
+  default_prompt: "Use $go-gf-backend-review to review this Go or GoFrame backend change."
