@@ -36,8 +36,10 @@ export const meta = {
     { title: 'Preflight', detail: 'Read work-item scope and acceptance criteria' },
     { title: 'Implement', detail: 'Implement with exact model and reasoning effort' },
     { title: 'Review round 1', detail: 'Run Standards and Spec review workers in parallel' },
-    { title: 'Repair', detail: 'Repair findings in a separate commit' },
-    { title: 'Review round 2', detail: 'Re-review the repaired delta, at most once' },
+    { title: 'Repair after review round 1', detail: 'Repair findings in a separate commit' },
+    { title: 'Review round 2', detail: 'Review the repaired delta at the approved implementation effort' },
+    { title: 'Final repair at higher effort', detail: 'After round 2 findings, raise implementation effort one supported level' },
+    { title: 'Review round 3', detail: 'Review the final repaired delta; unresolved findings require human direction' },
     { title: 'Closeout', detail: 'Close item and update checklist with evidence' },
   ],
 }
@@ -51,6 +53,14 @@ const PROFILES = {
   'opus-high': { model: 'opus', effort: 'high' },
   'opus-max': { model: 'opus', effort: 'max' },
   'opus-xhigh': { model: 'opus', effort: 'xhigh' },
+}
+
+const NEXT_IMPLEMENTATION_CANDIDATE = {
+  'sonnet-medium': 'sonnet-high',
+  'sonnet-high': 'sonnet-xhigh',
+  'opus-medium': 'opus-high',
+  'opus-high': 'opus-xhigh',
+  'opus-xhigh': 'opus-max',
 }
 
 const REVIEW_PROFILES = {
@@ -101,6 +111,10 @@ function describeCandidate(candidateId) {
     model: candidate.model,
     reasoning_effort: candidate.effort ?? 'unset',
   }
+}
+
+function nextImplementationCandidate(candidateId) {
+  return NEXT_IMPLEMENTATION_CANDIDATE[candidateId] || null
 }
 
 function parseJson(value, label) {
@@ -197,7 +211,7 @@ ${JSON.stringify(preflightData, null, 2)}
 Implementation summary:
 ${JSON.stringify(implementation, null, 2)}
 ${round > 1 ? `
-First-round review reports (including the original repair findings):
+All preceding review reports (including original findings):
 ${JSON.stringify(previousReports, null, 2)}
 ` : ''}
 `
@@ -223,8 +237,8 @@ ${shared}`
   ]
 }
 
-async function runRepair({ item, implementation, preflightData, reports, candidateId, label }) {
-  phase(label)
+async function runRepair({ item, implementation, preflightData, reports, candidateId, label, phaseLabel = label }) {
+  phase(phaseLabel)
   const candidate = resolveCandidate(candidateId)
   const candidateMapping = describeCandidate(candidateId)
   const result = await agent(
@@ -250,7 +264,7 @@ Preflight scope:
 ${JSON.stringify(preflightData, null, 2)}
 \`\`\`
 
-Complete first-round review reports:
+All preceding review reports:
 \`\`\`json
 ${JSON.stringify(reports, null, 2)}
 \`\`\``,
@@ -294,7 +308,8 @@ for (let i = 0; i < plan.length; i++) {
   let effectiveCandidate = plannedCandidate
   let implementation = null
   let implementationCommit = null
-  let repairCommit = null
+  const repairCommits = []
+  let effortEscalation = null
   let reviewRounds = []
 
   log(`[${i + 1}/${plan.length}] ${itemId}: preflight → implement → flat review/repair → closeout`)
@@ -333,20 +348,60 @@ ${JSON.stringify(preflightData, null, 2)}
     }
     implementationCommit = implementation.commit
 
-    // === STEP 3: Review round 1 ===
-    const firstReview = await runReviewRound({ item, implementation, preflightData, round: 1, expectedParent: implementation.reviewBase })
-    reviewRounds.push(firstReview)
+    // === STEP 3: Review and repair, with one effort escalation before round 3 ===
+    let expectedParent = implementation.reviewBase
+    let reviewActionRequired = null
+    for (let round = 1; round <= 3; round++) {
+      const reports = await runReviewRound({
+        item,
+        implementation,
+        preflightData,
+        round,
+        expectedParent,
+        previousReports: reviewRounds.flat(),
+      })
+      reviewRounds.push(reports)
+      if (!hasFindings(reports)) break
 
-    // A clean first review proceeds straight to closeout.
-    if (hasFindings(firstReview)) {
-      // Repair every finding before the sole allowed follow-up review.
+      const remainingFindings = reports.flatMap((report) =>
+        report.findings.map((finding) => ({ ...finding, axis: report.axis }))
+      )
+      if (round === 3) {
+        reviewActionRequired = {
+          reason: 'findings remain after review round 3',
+          remainingFindings,
+        }
+        break
+      }
+
+      if (round === 2) {
+        const higherCandidate = nextImplementationCandidate(effectiveCandidate)
+        if (!higherCandidate) {
+          reviewActionRequired = {
+            reason: `no documented higher supported implementation effort after review round 2 for ${effectiveCandidate}`,
+            remainingFindings,
+          }
+          break
+        }
+        const previousMapping = describeCandidate(effectiveCandidate)
+        effectiveCandidate = higherCandidate
+        effortEscalation = {
+          afterReviewRound: 2,
+          from: previousMapping,
+          to: describeCandidate(effectiveCandidate),
+        }
+        log(`[${itemId}] review round 2 still has findings; raising implementation effort to ${effectiveCandidate} for the final repair`)
+      }
+
+      const priorTaskCommit = implementation.commit
       const repaired = await runRepair({
         item,
         implementation,
         preflightData,
-        reports: firstReview,
+        reports: reviewRounds.flat(),
         candidateId: effectiveCandidate,
-        label: 'Repair',
+        label: round === 2 ? 'Final_repair_escalated' : `Repair_round_${round}`,
+        phaseLabel: round === 2 ? 'Final repair at higher effort' : 'Repair after review round 1',
       })
       if (repaired.outcome === 'implementation_failed') {
         throw new Error(`repair failed: ${compact(repaired.blocker || repaired.remainingWork || repaired)}`)
@@ -354,23 +409,35 @@ ${JSON.stringify(preflightData, null, 2)}
       if (repaired.reviewBase !== implementation.reviewBase || repaired.commit === implementation.commit) {
         throw new Error('repair must preserve reviewBase and return a new commit')
       }
-      repairCommit = repaired.commit
+      repairCommits.push(repaired.commit)
       implementation = repaired
-      const secondReview = await runReviewRound({ item, implementation, preflightData, round: 2, expectedParent: implementationCommit, previousReports: firstReview })
-      reviewRounds.push(secondReview)
-      if (hasFindings(secondReview)) {
-        const remainingFindings = secondReview.flatMap((report) =>
-          report.findings.map((finding) => ({ ...finding, axis: report.axis }))
-        )
-        results.push({ id: itemId, type: itemType, plannedCandidate, effectiveCandidate, reviewCandidate, reviewEvidence, implementationCommit, repairCommit, status: 'review_action_required', remainingFindings, reviewRounds })
-        stoppedAt = itemId
-        break
-      }
+      expectedParent = priorTaskCommit
     }
 
-    // === Closeout after the first clean round or the second clean round ===
+    if (reviewActionRequired) {
+      results.push({
+        id: itemId,
+        type: itemType,
+        plannedCandidate,
+        effectiveCandidate,
+        reviewCandidate,
+        reviewEvidence,
+        implementationCommit,
+        repairCommit: repairCommits.at(-1) || null,
+        repairCommits,
+        effortEscalation,
+        status: 'review_action_required',
+        ...reviewActionRequired,
+        reviewRounds,
+      })
+      stoppedAt = itemId
+      break
+    }
+
+    // === Closeout after the first clean round or any later clean round ===
     phase('Closeout')
-    const implementationSummary = JSON.stringify({ implementationCommit, repairCommit, implementation, reviewRounds, reviewCandidate, reviewEvidence, reviewMapping: describeReviewCandidate(reviewCandidate) })
+    const repairCommit = repairCommits.at(-1) || null
+    const implementationSummary = JSON.stringify({ implementationCommit, repairCommit, repairCommits, effortEscalation, implementation, reviewRounds, reviewCandidate, reviewEvidence, reviewMapping: describeReviewCandidate(reviewCandidate) })
     const preflightRev = preflightData.rev || preflightData.revision || 'unknown'
     const closeoutResult = parseCloseout(await agent(
       `Use \`$azure-devops-boards-skill\` in its semantic \`task-boards-ops\` role. Read the current full work item with \`show ${boardsConnectionArgs} --full --id ${itemId}\`. Read Acceptance Criteria from \`Microsoft.VSTS.Common.AcceptanceCriteria\`, separately from Description. Apply only evidence-backed Markdown checklist changes specified by the implementation and review summary, preserving all other Acceptance Criteria and Description content. Write the resulting Acceptance Criteria to \`/tmp/acceptance_criteria_${itemId}.md\` and a Markdown completion comment to \`/tmp/comment_${itemId}.md\`. Then run \`close-task --apply ${boardsConnectionArgs} --id ${itemId} --expected-rev ${preflightRev} --state Closed --acceptance-criteria-file /tmp/acceptance_criteria_${itemId}.md --comment-file /tmp/comment_${itemId}.md\`. Return the JSON output unchanged. Do not use \`--check-ac\`, and do not perform any non-Boards work.
@@ -391,6 +458,8 @@ ${implementationSummary}`,
       reviewBase: implementation.reviewBase,
       implementationCommit,
       repairCommit,
+      repairCommits,
+      effortEscalation,
       commit: implementation.commit,
       verification: implementation.verification,
       reviewRounds,
@@ -407,7 +476,9 @@ ${implementationSummary}`,
       reviewCandidate,
       reviewEvidence,
       implementationCommit,
-      repairCommit,
+      repairCommit: repairCommits.at(-1) || null,
+      repairCommits,
+      effortEscalation,
       status: 'delivery_failed',
       error: error.message,
       reviewRounds,

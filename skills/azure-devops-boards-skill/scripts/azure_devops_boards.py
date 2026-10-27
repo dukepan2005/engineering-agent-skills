@@ -221,8 +221,12 @@ ORDER BY [System.Id]"""
 
 
 def connect(args):
+    return connect_project(args, args.project)
+
+
+def connect_project(args, project):
     get_client, cls = sdk()
-    return AzureClient(get_client(args.organization), args.project), cls
+    return AzureClient(get_client(args.organization), project), cls
 
 
 def assert_description(item, text):
@@ -484,6 +488,97 @@ def safe_mutate(*, client, target, document, expectation, apply):
     return {"mode": "applied", "id": new_id, "rev": saved["rev"]}
 
 
+_MOVE_DERIVED_FIELDS = frozenset({
+    "System.TeamProject", "System.AreaPath", "System.IterationPath",
+    "System.AreaId", "System.IterationId", "System.NodeName", "System.Rev",
+    "System.ChangedDate", "System.ChangedBy", "System.AuthorizedDate",
+    "System.RevisedDate", "System.Watermark", "System.BoardColumn",
+    "System.BoardColumnDone",
+})
+
+
+def _move_relations(item):
+    values = []
+    for relation_item in item.get("relations", []):
+        identity = _relation_identity(relation_item.get("url", ""))
+        values.append((
+            relation_item.get("rel"),
+            identity if identity is not None else relation_item.get("url"),
+            json.dumps(relation_item.get("attributes", {}), sort_keys=True),
+        ))
+    return sorted(values)
+
+
+def _assert_move_preserved(before, after):
+    def preserved_fields(item):
+        return {
+            key: value for key, value in item.get("fields", {}).items()
+            if key not in _MOVE_DERIVED_FIELDS
+            and not key.startswith(("System.AreaLevel", "System.IterationLevel"))
+            and not (key.startswith("WEF_") and key.endswith("_System.ExtensionMarker"))
+        }
+
+    if preserved_fields(before) != preserved_fields(after):
+        raise RuntimeError("Move read-back changed fields outside the project, area, iteration, or server-managed fields.")
+    if before.get("multilineFieldsFormat", {}) != after.get("multilineFieldsFormat", {}):
+        raise RuntimeError("Move read-back changed multiline field formats.")
+    if _move_relations(before) != _move_relations(after):
+        raise RuntimeError("Move read-back changed native relations.")
+
+
+def move(args):
+    if args.expected_rev < 1:
+        raise RuntimeError("Expected revision must be a positive integer.")
+    if args.source_project == args.target_project:
+        raise RuntimeError("Source and target projects must differ.")
+    if (args.target_area_path != args.target_project
+            and not args.target_area_path.startswith(args.target_project + "\\")):
+        raise RuntimeError("Target Area Path must be inside the target project.")
+    if (args.target_iteration_path == args.target_project
+            or not args.target_iteration_path.startswith(args.target_project + "\\")):
+        raise RuntimeError("Target Iteration Path must be a concrete iteration inside the target project.")
+
+    source_client, cls = connect_project(args, args.source_project)
+    target_client, _ = connect_project(args, args.target_project)
+    before = source_client.read(args.id)
+    current_project = before.get("fields", {}).get("System.TeamProject")
+    if current_project != args.source_project:
+        raise RuntimeError(
+            f"Work item {args.id} is in {current_project!r}, not source project {args.source_project!r}."
+        )
+    if before.get("rev") != args.expected_rev:
+        raise RuntimeError(
+            f"Revision mismatch for work item {args.id}: expected {args.expected_rev}, "
+            f"current {before.get('rev')}; re-read and reconcile before retrying."
+        )
+
+    fields = {
+        "System.TeamProject": args.target_project,
+        "System.AreaPath": args.target_area_path,
+        "System.IterationPath": args.target_iteration_path,
+    }
+    target = ExistingItem(args.id)
+    document = [op(cls, "test", "/rev", args.expected_rev)]
+    document.extend(op(cls, "add", f"/fields/{name}", value) for name, value in fields.items())
+    expectation = Expectation(fields=fields)
+    checked = target_client.validate(document, target)
+    _evaluate(checked, expectation, "Validation")
+    if not args.apply:
+        return emit({"mode": "validated", "id": args.id, "rev": before["rev"],
+                     "sourceProject": args.source_project, "targetProject": args.target_project,
+                     "fields": fields})
+
+    target_client.apply(document, target)
+    saved = target_client.read(args.id)
+    _evaluate(saved, expectation, "Read-back")
+    _assert_move_preserved(before, saved)
+    emit({"mode": "applied", "id": args.id, "beforeRev": before["rev"],
+          "rev": saved["rev"], "sourceProject": args.source_project,
+          "targetProject": args.target_project, "fields": fields,
+          "relationsPreserved": len(before.get("relations", [])),
+          "otherFieldsPreserved": True, "multilineFormatsPreserved": True})
+
+
 def relation(args, kind, target):
     return {"rel": RELATIONS[kind], "url": f"{args.organization.rstrip('/')}/{args.project}/_apis/wit/workItems/{target}", "attributes": {"comment": "Added by azure-devops-boards skill"}}
 
@@ -567,6 +662,9 @@ def update(args):
             f"current {before['rev']}; re-read and reconcile before retrying."
         )
     document = [op(cls, "test", "/rev", expected_rev if expected_rev is not None else before["rev"])]; expected = {}; expected_formats = {}; text = None
+    if getattr(args, "title", None) is not None:
+        document.append(op(cls, "add", "/fields/System.Title", args.title))
+        expected["System.Title"] = args.title
     if args.description_file:
         text = args.description_file.read_text(); document += [op(cls, "add", "/fields/System.Description", text), op(cls, "add", "/multilineFieldsFormat/System.Description", "markdown")]
     for field, value in (("System.State", args.state), ("System.IterationPath", args.iteration),
@@ -764,9 +862,15 @@ def parser():
     create_p = commands.add_parser("create"); connection(create_p, True); create_p.add_argument("--apply", action="store_true"); create_p.add_argument("--type", choices=("Epic", "Feature", "User Story", "Task", "Bug"), required=True); create_p.add_argument("--title", required=True); create_p.add_argument("--description-file", type=Path, required=True); create_p.add_argument("--acceptance-criteria-file", type=Path, help="Task- or Bug-only Markdown for Microsoft.VSTS.Common.AcceptanceCriteria"); create_p.add_argument("--repro-steps-file", type=Path, help="Bug-only Markdown rendered as HTML for Microsoft.VSTS.TCM.ReproSteps"); create_p.add_argument("--system-info-file", type=Path, help="Bug-only Markdown rendered as HTML for Microsoft.VSTS.TCM.SystemInfo"); create_p.add_argument("--comment-file", type=Path, help="Optional initial Markdown comment; for a Bug without --repro-steps-file it becomes HTML Repro Steps"); create_p.add_argument("--iteration"); create_p.add_argument("--tags", action="append", default=[])
     for kind in RELATIONS: create_p.add_argument(f"--{kind}", action="append", type=int, default=[])
     create_p.set_defaults(run=create)
-    update_p = commands.add_parser("update"); connection(update_p); update_p.add_argument("--apply", action="store_true"); update_p.add_argument("--id", type=int, required=True); update_p.add_argument("--description-file", type=Path); update_p.add_argument("--acceptance-criteria-file", type=Path, help="Task- or Bug-only Markdown for Microsoft.VSTS.Common.AcceptanceCriteria"); update_p.add_argument("--repro-steps-file", type=Path, help="Bug-only Markdown rendered as HTML Repro Steps"); update_p.add_argument("--system-info-file", type=Path, help="Bug-only Markdown rendered as HTML System Info"); update_p.add_argument("--state"); update_p.add_argument("--iteration"); update_p.add_argument("--tags", action="append", default=[]); update_p.set_defaults(run=update)
+    update_p = commands.add_parser("update"); connection(update_p); update_p.add_argument("--apply", action="store_true"); update_p.add_argument("--id", type=int, required=True); update_p.add_argument("--title"); update_p.add_argument("--description-file", type=Path); update_p.add_argument("--acceptance-criteria-file", type=Path, help="Task- or Bug-only Markdown for Microsoft.VSTS.Common.AcceptanceCriteria"); update_p.add_argument("--repro-steps-file", type=Path, help="Bug-only Markdown rendered as HTML Repro Steps"); update_p.add_argument("--system-info-file", type=Path, help="Bug-only Markdown rendered as HTML System Info"); update_p.add_argument("--state"); update_p.add_argument("--iteration"); update_p.add_argument("--tags", action="append", default=[]); update_p.set_defaults(run=update)
     update_p.add_argument("--assigned-to", metavar="UNIQUE_NAME", help="Assign by Azure identity uniqueName (usually email); blank values are rejected")
     update_p.add_argument("--expected-rev", type=int, help="Revision used to prepare the update; stale revisions are rejected without retry")
+    move_p = commands.add_parser("move", help="move one work item to another project")
+    move_p.add_argument("--organization", default=os.environ.get("AZURE_DEVOPS_ORG"), required=not os.environ.get("AZURE_DEVOPS_ORG"))
+    move_p.add_argument("--source-project", required=True); move_p.add_argument("--target-project", required=True)
+    move_p.add_argument("--id", type=int, required=True); move_p.add_argument("--target-area-path", required=True)
+    move_p.add_argument("--target-iteration-path", required=True); move_p.add_argument("--expected-rev", type=int, required=True)
+    move_p.add_argument("--apply", action="store_true"); move_p.set_defaults(run=move)
     comment = commands.add_parser("add-comment"); connection(comment); comment.add_argument("--apply", action="store_true"); comment.add_argument("--id", type=int, required=True); comment.add_argument("--comment-file", type=Path, required=True); comment.set_defaults(run=add_comment)
     close = commands.add_parser("close-task"); connection(close); close.add_argument("--apply", action="store_true"); close.add_argument("--id", type=int, required=True); close.add_argument("--expected-rev", type=int); close.add_argument("--state"); close.add_argument("--comment-file", type=Path, required=True); close.add_argument("--description-file", type=Path); close_ac = close.add_mutually_exclusive_group(); close_ac.add_argument("--acceptance-criteria-file", type=Path, help="Task- or Bug-only Markdown for Microsoft.VSTS.Common.AcceptanceCriteria"); close_ac.add_argument("--check-ac", metavar="all|FRAGMENT", help="Check matching Markdown boxes in the native Acceptance Criteria field"); close.set_defaults(run=close_task)
     link = commands.add_parser("add-link"); connection(link); link.add_argument("--apply", action="store_true"); link.add_argument("--id", type=int, required=True); link.add_argument("--kind", choices=tuple(RELATIONS), required=True); link.add_argument("--target-id", type=int, required=True); link.set_defaults(run=add_link)

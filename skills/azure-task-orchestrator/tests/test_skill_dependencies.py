@@ -152,16 +152,17 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertIn('"outcome": "ready_for_review"', text)
         self.assertIn('`{"outcome":"completed", ...}`', text)
         self.assertIn("review_action_required", text)
-        self.assertRegex(text, r"Two review\s+rounds is the maximum")
+        self.assertIn("at most three dual-axis rounds", text)
+        self.assertIn("If round 3 still reports findings", text)
         self.assertIn("`implement-preflight` once with the explicit connection", text)
         self.assertIn("retain its `rev`\nfor closeout", text)
-        self.assertRegex(text, r"second\s+dual-axis review against the same `reviewBase\.\.\.HEAD` delta")
+        self.assertRegex(text, r"run review round 2 against the same `reviewBase\.\.\.HEAD`\s+delta")
         self.assertIn("create one separate repair\ncommit on top of the implementation commit", text)
         self.assertIn("new commit's parent is that same commit", text)
         self.assertRegex(text, r"the repair commit as `commit` and\s+the original `reviewBase`")
         self.assertNotIn("amend", text)
         self.assertIn("close the work item through\n`$azure-devops-boards-skill`", text)
-        self.assertIn("Do not close the work item in this mode", text)
+        self.assertRegex(text, r"Do not close the work item in\s+this mode")
         self.assertNotIn("working-tree review mode", text)
         self.assertNotIn("skills/azure-task-implement/references", text)
 
@@ -418,7 +419,7 @@ class SkillDependencyContractTests(unittest.TestCase):
         self.assertNotIn("implement-preflight --id ${itemId}", script)
         self.assertNotIn("show --full --id ${itemId}", script)
 
-    def test_orchestrator_caps_dual_review_at_two_rounds(self) -> None:
+    def test_orchestrator_escalates_after_round_two_and_stops_after_round_three(self) -> None:
         skill = self.read_skill("azure-task-orchestrator")
         script = (
             REPO_ROOT
@@ -428,24 +429,18 @@ class SkillDependencyContractTests(unittest.TestCase):
             / "claude-code-delivery-loop.js"
         ).read_text()
 
-        self.assertIn("If it is clean, proceed\ndirectly to closeout", skill)
-        self.assertIn("If round 2 still has any findings, return", skill)
+        self.assertRegex(skill, r"If review round 2 still has findings,\s+raise the implementation/repair")
+        self.assertIn("then run review\nround 3", skill)
+        self.assertIn("Three dual-axis review rounds is the", skill)
         self.assertIn("review_action_required", skill)
-        self.assertNotIn("REVIEW_ESCALATION", script)
-        self.assertNotIn("review_escalation_", script)
-        self.assertEqual(
-            2,
-            script.count("runReviewRound({ item, implementation, preflightData, round:"),
-        )
-        self.assertIn("if (hasFindings(firstReview))", script)
-        self.assertIn("if (hasFindings(secondReview))", script)
+        self.assertIn("NEXT_IMPLEMENTATION_CANDIDATE", script)
+        self.assertIn("round <= 3", script)
+        self.assertIn("if (!hasFindings(reports)) break", script)
+        self.assertIn("if (round === 2)", script)
+        self.assertIn("if (round === 3)", script)
         self.assertIn("status: 'review_action_required'", script)
-        review_branch = script.split("if (hasFindings(firstReview)) {", 1)[1].split(
-            "// === Closeout after the first clean round or the second clean round ===",
-            1,
-        )[0]
-        self.assertIn("round: 2", review_branch)
-        self.assertIn("break", review_branch)
+        self.assertIn("Final_repair_escalated", script)
+        self.assertIn("// === Closeout after the first clean round or any later clean round ===", script)
         registry = (
             REPO_ROOT
             / "skills"

@@ -18,7 +18,7 @@ sys.path.insert(0, str(HERE))                     # tests/   → fakes
 sys.path.insert(0, str(HERE.parent / "scripts"))  # scripts/ → azure_devops_boards
 
 from fakes import FakeClient, PatchOp  # noqa: E402
-from azure_devops_boards import RELATIONS, add_comment, add_link, close_task, create, parser, preflight, show_item, update  # noqa: E402
+from azure_devops_boards import RELATIONS, add_comment, add_link, close_task, create, move, parser, preflight, show_item, update  # noqa: E402
 
 ORG, PROJECT = "https://dev.azure.com/o", "P"
 
@@ -696,6 +696,159 @@ class ShowFullTests(unittest.TestCase):
         self.assertEqual(out["id"], 42)
         self.assertEqual(out["rev"], 3)
         self.assertIn("fields", out)
+
+
+class MoveCommandTests(unittest.TestCase):
+    def _seeded_clients(self):
+        item = {
+            "id": 42, "rev": 3,
+            "fields": {
+                "System.WorkItemType": "Task", "System.TeamProject": "Source",
+                "System.AreaPath": "Source", "System.IterationPath": "Source\\Sprint 1",
+                "System.Title": "Keep title", "System.State": "New",
+                "System.Tags": "FlowCoach; ready-for-agent",
+                "System.Description": "Keep body", "Microsoft.VSTS.Common.AcceptanceCriteria": "Keep AC",
+                "System.AreaId": 8, "System.IterationId": 12, "System.Rev": 3,
+            },
+            "multilineFieldsFormat": {"System.Description": "markdown", "Microsoft.VSTS.Common.AcceptanceCriteria": "markdown"},
+            "relations": [{"rel": "System.LinkTypes.Dependency-Reverse",
+                           "url": "https://dev.azure.com/o/source/_apis/wit/workItems/41",
+                           "attributes": {"name": "Predecessor"}}],
+        }
+        return FakeClient(items={42: item}), FakeClient(items={42: item})
+
+    def _args(self, apply=False, expected_rev=3):
+        return SimpleNamespace(organization=ORG, source_project="Source", target_project="Target",
+                               target_area_path="Target\\Team", target_iteration_path="Target\\Sprint 2",
+                               id=42, expected_rev=expected_rev, apply=apply)
+
+    def _run_move(self, args, clients):
+        def connect_project(_args, project):
+            return (clients[project], PatchOp)
+
+        with redirect_stdout(io.StringIO()) as buf, \
+                mock.patch("azure_devops_boards.connect_project", side_effect=connect_project):
+            move(args)
+        return json.loads(buf.getvalue())
+
+    def test_parser_requires_explicit_projects_paths_and_revision(self):
+        args = parser().parse_args([
+            "move", "--organization", ORG, "--source-project", "Source", "--target-project", "Target",
+            "--id", "42", "--target-area-path", "Target\\Team",
+            "--target-iteration-path", "Target\\Sprint 2", "--expected-rev", "3",
+        ])
+        self.assertEqual((args.source_project, args.target_project, args.expected_rev), ("Source", "Target", 3))
+
+    def test_dry_run_validates_exact_move_fields_without_writing(self):
+        source, target = self._seeded_clients()
+        with mock.patch.object(target, "validate", wraps=target.validate) as validate:
+            out = self._run_move(self._args(), {"Source": source, "Target": target})
+        self.assertEqual(out["mode"], "validated")
+        self.assertEqual(out["fields"], {
+            "System.TeamProject": "Target", "System.AreaPath": "Target\\Team",
+            "System.IterationPath": "Target\\Sprint 2",
+        })
+        self.assertEqual(target.applies, 0)
+        self.assertEqual(validate.call_count, 1)
+        document = validate.call_args.args[0]
+        self.assertEqual([(p.op, p.path, p.value) for p in document], [
+            ("test", "/rev", 3),
+            ("add", "/fields/System.TeamProject", "Target"),
+            ("add", "/fields/System.AreaPath", "Target\\Team"),
+            ("add", "/fields/System.IterationPath", "Target\\Sprint 2"),
+        ])
+
+    def test_apply_uses_same_patch_and_preserves_content_and_relations(self):
+        source, target = self._seeded_clients()
+        args = self._args(apply=True)
+        with mock.patch.object(target, "validate", wraps=target.validate) as validate, \
+                mock.patch.object(target, "apply", wraps=target.apply) as apply:
+            out = self._run_move(args, {"Source": source, "Target": target})
+        self.assertEqual(out["mode"], "applied")
+        self.assertEqual((out["beforeRev"], out["rev"]), (3, 4))
+        self.assertEqual(target.applies, 1)
+        validated = validate.call_args.args[0]
+        applied = apply.call_args.args[0]
+        self.assertEqual([(p.op, p.path, p.value) for p in validated],
+                         [(p.op, p.path, p.value) for p in applied])
+        saved = target.read(42)
+        self.assertEqual(saved["fields"]["System.TeamProject"], "Target")
+        self.assertEqual(saved["fields"]["System.AreaPath"], "Target\\Team")
+        self.assertEqual(saved["fields"]["System.IterationPath"], "Target\\Sprint 2")
+        self.assertEqual(saved["fields"]["System.Description"], "Keep body")
+        self.assertEqual(saved["fields"]["Microsoft.VSTS.Common.AcceptanceCriteria"], "Keep AC")
+        self.assertEqual(saved["fields"]["System.Tags"], "FlowCoach; ready-for-agent")
+        self.assertEqual(saved["relations"], source.read(42)["relations"])
+
+    def test_stale_revision_rejects_before_validation_or_write(self):
+        source, target = self._seeded_clients()
+        with self.assertRaisesRegex(RuntimeError, "Revision mismatch"):
+            self._run_move(self._args(expected_rev=2), {"Source": source, "Target": target})
+        self.assertEqual(target.validate_calls, 0)
+        self.assertEqual(target.applies, 0)
+
+    def test_project_root_is_not_accepted_as_concrete_iteration(self):
+        source, target = self._seeded_clients()
+        args = self._args()
+        args.target_iteration_path = "Target"
+        with self.assertRaisesRegex(RuntimeError, "concrete iteration"):
+            self._run_move(args, {"Source": source, "Target": target})
+        self.assertEqual(target.validate_calls, 0)
+
+    def test_apply_reports_relation_loss_after_write_without_retry(self):
+        source, target = self._seeded_clients()
+        original_apply = target.apply
+
+        def drop_relations(document, work_item):
+            item_id = original_apply(document, work_item)
+            target.items[item_id]["relations"] = []
+            return item_id
+
+        with mock.patch.object(target, "apply", side_effect=drop_relations):
+            with self.assertRaisesRegex(RuntimeError, "changed native relations"):
+                self._run_move(self._args(apply=True), {"Source": source, "Target": target})
+        self.assertEqual(target.validate_calls, 1)
+        self.assertEqual(target.applies, 1)
+
+    def test_apply_allows_only_known_azure_project_metadata_to_disappear(self):
+        source, target = self._seeded_clients()
+        metadata = {
+            "System.AuthorizedDate": "2026-10-22T00:00:00Z",
+            "System.BoardColumn": "To Do", "System.BoardColumnDone": False,
+            "WEF_4C5041C34A934302A2854EFBAADCDAE8_System.ExtensionMarker": True,
+        }
+        source.items[42]["fields"].update(metadata)
+        target.items[42]["fields"].update(metadata)
+        original_apply = target.apply
+
+        def azure_move(document, work_item):
+            item_id = original_apply(document, work_item)
+            for field in metadata:
+                target.items[item_id]["fields"].pop(field, None)
+            return item_id
+
+        with mock.patch.object(target, "apply", side_effect=azure_move):
+            out = self._run_move(self._args(apply=True), {"Source": source, "Target": target})
+        self.assertEqual(out["mode"], "applied")
+        self.assertEqual(target.applies, 1)
+
+    def test_apply_rejects_other_system_or_wef_field_loss(self):
+        for field in ("System.Priority", "WEF_custom_System.CustomField"):
+            with self.subTest(field=field):
+                source, target = self._seeded_clients()
+                source.items[42]["fields"][field] = "retained"
+                target.items[42]["fields"][field] = "retained"
+                original_apply = target.apply
+
+                def azure_move(document, work_item):
+                    item_id = original_apply(document, work_item)
+                    target.items[item_id]["fields"].pop(field, None)
+                    return item_id
+
+                with mock.patch.object(target, "apply", side_effect=azure_move):
+                    with self.assertRaisesRegex(RuntimeError, "changed fields"):
+                        self._run_move(self._args(apply=True), {"Source": source, "Target": target})
+                self.assertEqual(target.applies, 1)
 
 
 def _run_with_func(func, fake, args):

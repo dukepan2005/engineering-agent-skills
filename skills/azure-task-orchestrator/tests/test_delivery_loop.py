@@ -13,9 +13,11 @@ const source = fs.readFileSync(process.argv[1], 'utf8').replace('export const me
 const execute = new AsyncFunction('args', 'agent', 'phase', 'log', source);
 const finding = {priority:'P2', location:'file:1', summary:'repair this fault', evidence:'original proof'};
 const applied = {mode:'applied', id:123, rev:2, fields:{'System.State':'Closed'}, commentId:1};
-async function run({repair=false, transformReview=r=>r, closeout=applied, itemId='AB#123'} = {}) {
+async function run({repair=false, findingsRounds=null, transformReview=r=>r, closeout=applied, itemId='AB#123', plannedCandidate='opus-high'} = {}) {
   const calls = [], firstReports = [];
-  const item = {id:itemId, type:'Task', plannedCandidate:'opus-high', reviewCandidate:'sonnet-medium',
+  const reviewFindings = findingsRounds || (repair ? [1] : []);
+  let repairCount = 0;
+  const item = {id:itemId, type:'Task', plannedCandidate, reviewCandidate:'sonnet-medium',
     reviewEvidence:'review rationale', plannerEvidence:'implementation rationale', orderReason:'stable'};
   const agent = async (prompt, options) => {
     calls.push({prompt, ...options});
@@ -24,14 +26,18 @@ async function run({repair=false, transformReview=r=>r, closeout=applied, itemId
     if (options.label.startsWith('review_')) {
       const round = Number(options.label.split('_')[1]);
       const axis = options.label.includes('_standards_') ? 'standards' : 'spec';
-      const findings = repair && round === 1 ? [finding] : [];
-      const report = {axis, reviewBase:'base', head:round===1?'impl':'repair', parent:round===1?'base':'impl',
+      const findings = reviewFindings.includes(round) ? [finding] : [];
+      const head = round === 1 ? 'impl' : `repair${round - 1}`;
+      const parent = round === 1 ? 'base' : round === 2 ? 'impl' : `repair${round - 2}`;
+      const report = {axis, reviewBase:'base', head, parent,
         status:findings.length?'findings':'clean', findings, summary:`${axis} original report context`};
       if (round === 1) firstReports.push(report);
       return transformReview(report, round);
     }
+    const isRepair = options.label.startsWith('Repair_') || options.label.startsWith('Final_repair_');
+    const commit = isRepair ? `repair${++repairCount}` : 'impl';
     return {outcome:'ready_for_review', reviewBase:'base', taskStartCommit:'base',
-      commit:options.label.startsWith('Repair_')?'repair':'impl', verification:[], acceptanceEvidence:[]};
+      commit, verification:[], acceptanceEvidence:[]};
   };
   const report = await execute({validatedPlan:[item],trackerConnection:{organization:'org',project:'project'}},agent,()=>{},()=>{});
   return {report,calls,firstReports};
@@ -102,13 +108,48 @@ for (const reviewer of reviewers) {
 }
 """)
 
-    def test_remaining_second_round_findings_stop_closeout(self):
+    def test_second_round_findings_raise_effort_for_one_final_repair(self):
         self.run_probe(r"""
-const {report,calls} = await run({repair:true,transformReview:r=>({...r,status:'findings',findings:[finding]})});
+for (const [plannedCandidate, fromEffort, toEffort] of [
+  ['opus-high', 'high', 'xhigh'],
+  ['opus-xhigh', 'xhigh', 'max'],
+]) {
+  const {report,calls} = await run({repair:true,findingsRounds:[1,2],plannedCandidate});
+  assert.equal(report.completedItems,1);
+  assert.equal(report.results[0].status,'completed');
+  assert.equal(calls.filter(c=>c.label.startsWith('Repair_') || c.label.startsWith('Final_repair_')).length,2);
+  assert.equal(calls.filter(c=>c.label.startsWith('review_')).length,6);
+  const repairs = calls.filter(c=>c.label.startsWith('Repair_') || c.label.startsWith('Final_repair_'));
+  assert.deepEqual(repairs.map(c=>[c.model,c.effort]),[['opus',fromEffort],['opus',toEffort]]);
+  const reviewers = calls.filter(c=>c.label.startsWith('review_'));
+  assert.ok(reviewers.every(c=>c.model==='sonnet' && c.effort==='medium'));
+  assert.equal(report.results[0].effortEscalation.from.reasoning_effort,fromEffort);
+  assert.equal(report.results[0].effortEscalation.to.reasoning_effort,toEffort);
+}
+""")
+
+    def test_third_round_findings_stop_without_closeout(self):
+        self.run_probe(r"""
+const {report,calls} = await run({repair:true,findingsRounds:[1,2,3]});
 assert.equal(report.completedItems,0);
 assert.equal(report.results[0].status,'review_action_required');
 assert.equal(report.stoppedAt,'AB#123');
-assert.equal(calls.filter(c=>c.label.startsWith('Repair_')).length,1);
+assert.equal(report.results[0].reviewRounds.length,3);
+assert.equal(report.results[0].repairCommits.length,2);
+assert.ok(report.results[0].reason.includes('review round 3'));
+assert.equal(calls.filter(c=>c.label.startsWith('Repair_') || c.label.startsWith('Final_repair_')).length,2);
+assert.equal(calls.filter(c=>c.label.startsWith('review_')).length,6);
+assert.ok(!calls.some(c=>c.label.startsWith('closeout_')));
+""")
+
+    def test_no_higher_supported_effort_stops_after_second_round(self):
+        self.run_probe(r"""
+const {report,calls} = await run({repair:true,findingsRounds:[1,2],plannedCandidate:'opus-max'});
+assert.equal(report.completedItems,0);
+assert.equal(report.results[0].status,'review_action_required');
+assert.ok(report.results[0].reason.includes('no documented higher supported implementation effort'));
+assert.equal(report.results[0].reviewRounds.length,2);
+assert.equal(report.results[0].repairCommits.length,1);
 assert.equal(calls.filter(c=>c.label.startsWith('review_')).length,4);
 assert.ok(!calls.some(c=>c.label.startsWith('closeout_')));
 """)

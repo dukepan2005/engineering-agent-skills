@@ -275,9 +275,8 @@ child directly; no child may start another child.
 | --- | --- | --- |
 | Preflight | one cheap Boards child | read-only tracker snapshot |
 | Implement | one planned-candidate child | implementation, tests, task commit |
-| Review round 1 | two parallel read-only children | Standards axis and Spec axis |
-| Repair | one same-candidate child, only when round 1 has findings | rerun verification and create a separate repair commit |
-| Review round 2 | two parallel read-only children, only after repair | verify the repaired delta |
+| Review rounds 1–3 | two parallel read-only children per round | Standards axis and Spec axis |
+| Repair | one same-model child after a finding round; after round 2 findings, use one higher supported implementation effort for the final repair | rerun verification and create a separate repair commit |
 | Closeout | one cheap Boards child | evidence-backed Acceptance Criteria update and close |
 
 Use [references/flat-review-worker.md](references/flat-review-worker.md) as the
@@ -391,8 +390,9 @@ outcome, stop immediately. Do not dispatch later work items.
 For each review round, the parent starts two read-only children in parallel,
 one with `reviewAxis=standards` and one with `reviewAxis=spec`, using the exact
 `reviewBase` and current task commit returned by the implementation worker.
-Supply `expectedParent=reviewBase` for round 1 and the initial implementation
-commit as `expectedParent` for round 2.
+Supply the parent of the reviewed task commit as `expectedParent`: this is
+`reviewBase` for round 1 and the immediately preceding implementation or
+repair commit for each later round.
 Give both workers the work-item scope, acceptance evidence, and
 [the flat worker contract](references/flat-review-worker.md). They must return
 the contract's JSON without editing code, Git, Boards, or spawning children.
@@ -412,21 +412,26 @@ Run review round 1 immediately after implementation. If it is clean, proceed
 directly to closeout; do not run an unnecessary second round. If it contains
 any finding, spawn one repair worker at the same effective candidate with
 `reviewOwner=parent`, the original preflight scope, `reviewBase`, current task
-commit, and both complete review reports. Require it to repair the existing
-delta, rerun verification, and create one separate task-only repair commit on
-top of the implementation commit; it must not invoke `$code-review`, spawn a
-child, or perform Boards operations. Validate the repair commit's parent is
-the prior task commit and `reviewBase` is unchanged. If the repair fails, stop.
-After a successful repair, give both review workers the complete first-round
-reports, including the original findings, and run review
-round 2 against the resulting `reviewBase...HEAD` delta. A clean
-round 2 permits closeout. If round 2 still has any findings, return
-`review_action_required` with the reports and remaining findings, then stop:
-do not close the item, dispatch another repair worker, or start a later
-work item. Wait for further human direction. Two dual-axis review rounds is the
-maximum; do not continue automated repair/review beyond that limit. A malformed
-or mismatched review is a failed review, never a clean result, and also stops
-the sequence.
+commit, and the reports that triggered the repair. Require it to repair the
+existing delta, rerun verification, and create one separate task-only repair
+commit; it must not invoke `$code-review`, spawn a child, or perform Boards
+operations. Validate each repair commit's parent is the prior task commit and
+`reviewBase` is unchanged. If repair or verification fails, stop. After a
+successful repair, give both review workers all preceding reports and run the
+next review round against the resulting `reviewBase...HEAD` delta.
+
+If review round 2 still has findings, raise the implementation/repair
+`reasoning_effort` by exactly one supported level while keeping the same model.
+Use that raised effort for the final repair and verification, then run review
+round 3. Keep the approved review candidate and its effort unchanged across all
+rounds. If round 3 is clean, proceed to closeout. If round 3 still has findings,
+return `review_action_required` with all reports and remaining findings, then
+stop: do not close the item or dispatch a later work item. If the selected
+implementation candidate has no documented higher supported effort after
+round 2, return `review_action_required` with that reason and the findings;
+do not invent a model/effort mapping. Three dual-axis review rounds is the
+maximum. A malformed or mismatched review is a failed review, never a clean
+result, and also stops the sequence.
 
 ### 4. Closeout — spawn helper agent
 
