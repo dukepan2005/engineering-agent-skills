@@ -198,13 +198,16 @@ evaluate candidates. For a model family not covered by that guidance, rely on
 its current official documentation and benchmark evidence without inferring a
 ranking from the family name.
 
-For built-in Codex/ChatGPT candidates, use `sol-medium` when decisions are
+For built-in Codex/ChatGPT candidates, consider `sol-medium` when decisions are
 resolved or residual judgment is bounded and verification is strong,
 `sol-high` when material reasoning hazards remain, and `sol-xhigh` only when
-the `xhigh` gates below are met.
+the `xhigh` gates below are met. Consider `sol-max` under the `max` guidance
+below.
 `luna-max` is an exceptional candidate governed by its separate qualification
-gates. The registry defines the exact allowed built-in candidates for this
-workflow.
+gates. Also consider `terra-high`, `terra-xhigh`, and `terra-max` using current
+model and evaluation evidence and the effort gates below; do not assume Terra
+is better or cheaper than Sol. The registry defines the exact allowed built-in
+candidates for this workflow.
 
 For built-in Claude Code candidates, prefer a Sonnet profile when material
 decisions are resolved; use Opus when source-backed residual judgment or a
@@ -237,13 +240,14 @@ below is evidenced:
    edge-case handling or exhaustive deterministic test construction.
 
 Do not choose `luna-max` merely for cost, ticket size, or multiple files. If a
-gate is missing, choose `sol-medium`, `sol-high`, or `sol-xhigh` according to
-the evidence. This profile exists only for Codex/ChatGPT; on another host,
+gate is missing, choose a suitable Sol or Terra profile according to the
+evidence. This profile exists only for Codex/ChatGPT; on another host,
 select from that host's registry without substituting a different model for it.
 
 ### Choose the Model Family
 
-For built-in Codex/ChatGPT choices, use the Sol profiles for regular work.
+For built-in Codex/ChatGPT choices, consider Sol and Terra profiles for regular
+work using source-backed suitability, cost, and verification evidence.
 Select Luna only through the qualified `luna-max` gates above; resolved
 decisions or easy verification alone do not qualify. This remains true when
 independently verifiable edits span multiple modules or repositories.
@@ -261,9 +265,10 @@ material decisions; choose Opus when source-backed residual judgment remains, su
 - ownership, lifecycle, security, migration, or compatibility semantics remain
   unresolved.
 
-For built-in Codex/ChatGPT choices, these residual-judgment cases are Sol
-triggers. For additional candidates or on Cursor, apply effort only where the
-candidate supports it and use current source evidence to evaluate the model.
+For built-in Codex/ChatGPT choices, assess these residual-judgment cases when
+comparing Sol and Terra. For additional candidates or on Cursor, apply effort
+only where the candidate supports it and use current source evidence to evaluate
+the model.
 Treat cross-boundary scope as a prompt to inspect the seam, never as a
 model-family trigger by itself.
 
@@ -298,9 +303,12 @@ Use `xhigh` only when all of these gates are evidenced:
    of this work-item class show a material benefit over `high`.
 
 Otherwise cap the initial effort at `high`. Treat `sol-high` as a hazard-driven
-choice and `sol-xhigh` as exceptional. Do not invent profiles. `luna-max` is
-the only built-in `max` profile for Codex/ChatGPT and requires every
-qualified-Luna gate above; this workflow does not include a Sol `max` candidate.
+choice and `sol-xhigh` as exceptional. Apply the same `high` and `xhigh` gates
+to Terra. Select `sol-max` or `terra-max` only when the `xhigh` gates are met
+and the task's risks, verification limits, or matched evaluations justify
+additional effort. Without matched evaluations, state that the benefit over
+the same model's `xhigh` is unverified. `luna-max` requires every qualified-Luna
+gate above. Do not invent profiles.
 
 ## Choose the Review Candidate
 

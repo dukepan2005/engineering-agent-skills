@@ -290,6 +290,10 @@ class SkillDependencyContractTests(unittest.TestCase):
                 ("sol-medium", "gpt-6.1-sol", "medium", "—"),
                 ("sol-high", "gpt-6.1-sol", "high", "`sol-medium`"),
                 ("sol-xhigh", "gpt-6.1-sol", "xhigh", "`sol-high`"),
+                ("sol-max", "gpt-6.1-sol", "max", "—"),
+                ("terra-high", "gpt-6.1-terra", "high", "—"),
+                ("terra-xhigh", "gpt-6.1-terra", "xhigh", "—"),
+                ("terra-max", "gpt-6.1-terra", "max", "—"),
             ],
             re.findall(
                 r"^\| `([^`]+)` \| `([^`]+)` \| `([^`]+)` \| (—|`[^`]+`) \|$",
@@ -298,6 +302,15 @@ class SkillDependencyContractTests(unittest.TestCase):
             ),
         )
         self.assertIn("only built-in Codex/ChatGPT execution candidates", codex)
+        review = text.split("For Codex/ChatGPT, the complete review pool is:", 1)[1].split("These exact pairs", 1)[0]
+        for effort in ("xhigh", "max"):
+            self.assertIn(f"| `sol-{effort}` | `gpt-6.1-sol` | `{effort}` |", review)
+        for effort in ("high", "xhigh", "max"):
+            self.assertIn(f"| `terra-{effort}` | `gpt-6.1-terra` | `{effort}` |", review)
+        planner = self.read_skill("task-model-planner")
+        self.assertIn("`terra-high`, `terra-xhigh`, and `terra-max`", planner)
+        self.assertNotIn("the only built-in `max` profile for Codex/ChatGPT", planner)
+        self.assertNotIn("does not include a Sol `max` candidate", planner)
         claude = text.split("## Claude Code", 1)[1].split("## Cursor", 1)[0]
         self.assertIn("| `sonnet-medium` | `sonnet` | `medium` |", claude)
         self.assertIn("| `sonnet-high` | `sonnet` | `high` |", claude)

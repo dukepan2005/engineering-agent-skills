@@ -19,6 +19,10 @@ model configuration only when spawning the child agent.
 | `sol-medium` | `gpt-6.1-sol` | `medium` | — |
 | `sol-high` | `gpt-6.1-sol` | `high` | `sol-medium` |
 | `sol-xhigh` | `gpt-6.1-sol` | `xhigh` | `sol-high` |
+| `sol-max` | `gpt-6.1-sol` | `max` | — |
+| `terra-high` | `gpt-6.1-terra` | `high` | — |
+| `terra-xhigh` | `gpt-6.1-terra` | `xhigh` | — |
+| `terra-max` | `gpt-6.1-terra` | `max` | — |
 
 These are the only built-in Codex/ChatGPT execution candidates for this
 workflow. Other host-supported model/effort combinations are intentionally not
@@ -75,8 +79,10 @@ Do not infer a capability ranking or automatic fallback between Grok versions.
 
 ## Planning profiles
 
-For Codex/ChatGPT, use `sol-medium`, `sol-high`, or `sol-xhigh` according to
-the effort guidance in `../SKILL.md`. Select `luna-max` only when its separate
+For Codex/ChatGPT, consider `sol-medium`, `sol-high`, `sol-xhigh`, or `sol-max` according to
+the effort guidance in `../SKILL.md`; consider `terra-high`, `terra-xhigh`,
+and `terra-max` using the same evidence-based selection and effort gates.
+Select `luna-max` only when its separate
 gates in `../SKILL.md` are all met. For Claude Code, use a Sonnet profile when
 material decisions are resolved and an Opus profile when residual judgment or
 deeper implementation reasoning remains. For Cursor, choose a host-configured
@@ -98,6 +104,11 @@ For Codex/ChatGPT, the complete review pool is:
 | `luna-max` | `gpt-6-luna` | `max` |
 | `sol-medium` | `gpt-6.1-sol` | `medium` |
 | `sol-high` | `gpt-6.1-sol` | `high` |
+| `sol-xhigh` | `gpt-6.1-sol` | `xhigh` |
+| `sol-max` | `gpt-6.1-sol` | `max` |
+| `terra-high` | `gpt-6.1-terra` | `high` |
+| `terra-xhigh` | `gpt-6.1-terra` | `xhigh` |
+| `terra-max` | `gpt-6.1-terra` | `max` |
 
 These exact pairs are supported by the active Codex host metadata. User wording
 “6.0 luma max” maps to the host identifier `gpt-6-luna` with `max`; it does not
