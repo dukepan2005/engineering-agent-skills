@@ -787,6 +787,28 @@ class MoveCommandTests(unittest.TestCase):
         self.assertEqual(target.validate_calls, 0)
         self.assertEqual(target.applies, 0)
 
+    def test_apply_accepts_recreated_artifact_metadata_and_project_url_changes(self):
+        source, target = self._seeded_clients()
+        artifact = {"rel": "ArtifactLink", "url": "vstfs:///Git/Commit/project%2frepo%2fcommit",
+                    "attributes": {"name": "Fixed in Commit", "id": 1, "authorizedDate": "old"}}
+        for client in (source, target):
+            client.items[42]["relations"].append(dict(artifact))
+        original_apply = target.apply
+
+        def azure_move(document, work_item):
+            item_id = original_apply(document, work_item)
+            relations = target.items[item_id]["relations"]
+            relations[0]["url"] = relations[0]["url"].replace("/source/", "/target-guid/")
+            relations[1]["attributes"].update(id=2, authorizedDate="new")
+            relations.reverse()
+            return item_id
+
+        with mock.patch.object(target, "apply", side_effect=azure_move):
+            out = self._run_move(self._args(apply=True), {"Source": source, "Target": target})
+        self.assertEqual(out["mode"], "applied")
+        self.assertEqual(out["relationsPreserved"], 2)
+        self.assertEqual(target.applies, 1)
+
     def test_project_root_is_not_accepted_as_concrete_iteration(self):
         source, target = self._seeded_clients()
         args = self._args()

@@ -48,6 +48,11 @@ single-item `move` command documented in `references/commands.md`. Do not
 recreate items to simulate a move; preserve IDs and verify content and native
 relations after each applied move.
 
+Move verification preserves relation types, directions, targets, duplicate counts,
+and business attributes regardless of ordering. Only work-item project segments
+within the requested organization and Azure-recreated ArtifactLink `id` and
+`authorizedDate` attributes may differ; artifact URLs must remain exact.
+
 ## Boards child mode: execute the local helper
 
 When the current prompt already assigns the semantic `task-boards-ops` role,

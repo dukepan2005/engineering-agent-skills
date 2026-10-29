@@ -5,6 +5,7 @@ import argparse
 import html
 import json
 import os
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 import subprocess
@@ -497,19 +498,25 @@ _MOVE_DERIVED_FIELDS = frozenset({
 })
 
 
-def _move_relations(item):
+def _move_relations(item, organization):
     values = []
     for relation_item in item.get("relations", []):
-        identity = _relation_identity(relation_item.get("url", ""))
-        values.append((
-            relation_item.get("rel"),
-            identity if identity is not None else relation_item.get("url"),
-            json.dumps(relation_item.get("attributes", {}), sort_keys=True),
-        ))
-    return sorted(values)
+        value = dict(relation_item)
+        url = value.get("url", "")
+        identity = _relation_identity(url)
+        if (value.get("rel", "").startswith("System.LinkTypes.")
+                and identity is not None and identity[0] == organization.rstrip("/")
+                and url.endswith(f"/_apis/wit/workItems/{identity[1]}")):
+            value["url"] = identity
+        if value.get("rel") == "ArtifactLink":
+            # Azure recreates these read-only attributes during a project move.
+            value["attributes"] = {key: val for key, val in value.get("attributes", {}).items()
+                                   if key not in {"id", "authorizedDate"}}
+        values.append(json.dumps(value, sort_keys=True))
+    return Counter(values)
 
 
-def _assert_move_preserved(before, after):
+def _assert_move_preserved(before, after, organization):
     def preserved_fields(item):
         return {
             key: value for key, value in item.get("fields", {}).items()
@@ -522,7 +529,7 @@ def _assert_move_preserved(before, after):
         raise RuntimeError("Move read-back changed fields outside the project, area, iteration, or server-managed fields.")
     if before.get("multilineFieldsFormat", {}) != after.get("multilineFieldsFormat", {}):
         raise RuntimeError("Move read-back changed multiline field formats.")
-    if _move_relations(before) != _move_relations(after):
+    if _move_relations(before, organization) != _move_relations(after, organization):
         raise RuntimeError("Move read-back changed native relations.")
 
 
@@ -571,7 +578,7 @@ def move(args):
     target_client.apply(document, target)
     saved = target_client.read(args.id)
     _evaluate(saved, expectation, "Read-back")
-    _assert_move_preserved(before, saved)
+    _assert_move_preserved(before, saved, args.organization)
     emit({"mode": "applied", "id": args.id, "beforeRev": before["rev"],
           "rev": saved["rev"], "sourceProject": args.source_project,
           "targetProject": args.target_project, "fields": fields,
