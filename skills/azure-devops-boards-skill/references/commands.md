@@ -43,6 +43,7 @@ Read the repository's tracker instructions before operating. Treat its work-item
 
 ```bash
 sh "$HELPER" current-sprint
+sh "$HELPER" sprint-inventory --organization "$AZURE_DEVOPS_ORG" --project "$AZURE_DEVOPS_PROJECT" --team "$AZURE_DEVOPS_TEAM"
 sh "$HELPER" show --id 61               # compact default (id/rev/type/state/title/relations)
 sh "$HELPER" show --id 61 --full        # raw Azure JSON
 sh "$HELPER" search --organization "$AZURE_DEVOPS_ORG" --project "$AZURE_DEVOPS_PROJECT" \
@@ -247,3 +248,14 @@ documents Bug-specific Repro Steps, System Info, and Found in Build fields.
 The [Revisions - List](https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/revisions/list?view=azure-devops-rest-7.1)
 and Updates APIs are historical change streams, not a replacement for the
 current fields plus Discussion comments used by the planner.
+
+## Current Sprint inventory
+
+`sprint-inventory` resolves the team's current concrete Sprint and reads every
+work-item type and state in that exact iteration, including owner, priority,
+Description, native Acceptance Criteria, and relations. It also reads the
+current state of each native predecessor, including those outside the Sprint.
+The caller determines terminal states according to the project's workflow.
+The command fails if the query reaches 20,000 results, a requested item is
+missing, or an item moves to another iteration during the read. Reads are not
+an atomic snapshot; rerun if the Board changes while planning.

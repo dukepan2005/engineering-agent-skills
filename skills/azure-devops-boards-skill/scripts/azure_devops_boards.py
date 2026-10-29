@@ -175,6 +175,23 @@ MODE (MustContain)"""
                 target_ids.append(target_id)
         return target_ids
 
+    def sprint_item_ids(self, iteration):
+        if not iteration or any(ord(c) < 32 or c in "\'\"" for c in iteration):
+            raise RuntimeError("Invalid iteration path.")
+        query = f"""SELECT [System.Id] FROM WorkItems
+WHERE [System.TeamProject] = @project AND [System.IterationPath] = '{iteration}'
+ORDER BY [System.Id]"""
+        result = self._api._send(http_method="POST", location_id=self.WIQL_ID, version="5.0",
+                                 route_values={"project": self._project}, query_parameters={"$top": 20000},
+                                 content={"query": query}, media_type="application/json").json()
+        items = result.get("workItems")
+        if not isinstance(items, list) or len(items) >= 20000:
+            raise RuntimeError("Sprint query missing results or reached its limit; inventory may be incomplete.")
+        ids = [int(item["id"]) for item in items]
+        if len(ids) != len(set(ids)):
+            raise RuntimeError("Sprint query returned duplicate IDs.")
+        return ids
+
     def search_item_ids_by_title(self, title_contains, item_types, top):
         title_contains, item_types = _validate_search_filters(title_contains, item_types)
         if not isinstance(top, int) or not 2 <= top <= SEARCH_LIMIT_MAX + 1:
@@ -418,6 +435,39 @@ def search_items(args):
     emit({"mode": "read", "project": args.project, "titleContains": title_contains,
           "types": list(item_types), "limit": args.limit, "returned": len(items),
           "possiblyTruncated": truncated, "items": items})
+
+
+def sprint_inventory(args):
+    iteration = sprint(args)
+    client = connect(args)[0]
+    ids = client.sprint_item_ids(iteration)
+    items = [client.read(item_id) for item_id in ids]
+    for item_id, item in zip(ids, items):
+        if item.get("id") != item_id or item.get("fields", {}).get("System.IterationPath") != iteration:
+            raise RuntimeError(f"Sprint item {item_id} changed or was omitted during read; retry.")
+    predecessors = set()
+    for item in items:
+        for relation in _relation_summary(item):
+            if relation["rel"] == RELATIONS["predecessor"]:
+                target = relation["targetId"]
+                if not isinstance(target, int):
+                    raise RuntimeError("Invalid predecessor relation.")
+                predecessors.add(target)
+    by_id = {item["id"]: item for item in items}
+    for target in sorted(predecessors - by_id.keys()):
+        linked = client.read(target)
+        if linked.get("id") != target:
+            raise RuntimeError(f"Predecessor {target} was omitted during read.")
+        by_id[target] = linked
+    def summary(item):
+        fields = item.get("fields", {})
+        return {"id": item["id"], "rev": item.get("rev"), "type": fields.get("System.WorkItemType"),
+                "title": fields.get("System.Title"), "state": fields.get("System.State"),
+                "assignedTo": fields.get("System.AssignedTo"), "priority": fields.get("Microsoft.VSTS.Common.Priority"),
+                "iterationPath": fields.get("System.IterationPath"), "description": fields.get("System.Description"),
+                "acceptanceCriteria": fields.get(ACCEPTANCE_CRITERIA_FIELD), "relations": _relation_summary(item)}
+    emit({"mode": "read", "iterationPath": iteration, "items": [summary(item) for item in items],
+          "predecessors": [summary(by_id[target]) for target in sorted(predecessors)]})
 
 
 def show_item(args):
@@ -859,6 +909,7 @@ def connection(parser, team=False):
 def parser():
     root = argparse.ArgumentParser(description=__doc__); commands = root.add_subparsers(required=True)
     current = commands.add_parser("current-sprint"); connection(current, True); current.set_defaults(run=lambda a: print(sprint(a)))
+    inventory = commands.add_parser("sprint-inventory", help="read all current Sprint items and predecessors"); connection(inventory, True); inventory.set_defaults(run=sprint_inventory)
     show = commands.add_parser("show"); connection(show); show.add_argument("--id", type=int, required=True); show.add_argument("--full", action="store_true", help="emit the full Azure JSON"); show.set_defaults(run=show_item)
     search = commands.add_parser("search", help="read-only project-scoped search by title")
     search.add_argument("--organization", required=True); search.add_argument("--project", required=True)
