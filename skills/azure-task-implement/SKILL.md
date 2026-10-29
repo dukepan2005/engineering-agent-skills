@@ -67,9 +67,58 @@ this shape:
 }
 ```
 
-If implementation or verification cannot complete, return
-`{"outcome":"implementation_failed", ...}` with the concrete blocker and
-the current commit (or `null`). Do not claim review or closeout readiness.
+## Incomplete work and recovery checkpoints
+
+Keep repairing in-scope code, tests and recoverable environment failures using
+existing authorization. A red test or an unavailable test helper is not itself
+a request for human intervention. For parent-owned execution, use the
+[autonomous recovery policy](../azure-task-orchestrator/SKILL.md#autonomous-recovery-and-diagnostic-escalation).
+Keep the assigned model/effort fixed during a worker turn; yield a checkpoint
+to the parent to perform an approved diagnostic escalation. Checkpoint within
+10 minutes of diagnosis (finish an already running bounded test first), or
+earlier after two rejected candidate fixes or a concrete external blocker.
+
+Return an incomplete checkpoint with the original fixed point and current
+commit (or `null`):
+
+```json
+{
+  "outcome": "implementation_failed",
+  "reviewBase": "<starting commit>",
+  "taskStartCommit": "<starting commit>",
+  "commit": null,
+  "recovery": {
+    "disposition": "retry",
+    "reason": "<exact incomplete behavior>",
+    "evidence": "<red command/result or relevant artifact>",
+    "nextAction": "<permitted local recovery>"
+  },
+  "diagnostics": {"noProgressMinutes": 0, "rejectedFixes": 0}
+}
+```
+
+Use `retry` when the current authorized scope still has a concrete local
+recovery. Use `blocked` only for evidence-backed missing external access,
+credentials, conflicting scope or user-owned changes, or a required decision
+that cannot be resolved locally. State the exact missing input in `nextAction`.
+For a denied operation, retain `deniedAction`; a retry also requires a different
+permitted `safeAlternative`, with the reason it respects the rejection. Never
+repeat or indirectly bypass a denied action. An uncertain or unavailable safe
+alternative is `blocked`, not a speculative retry.
+
+Measure `noProgressMinutes` from the last new causal evidence, and
+`rejectedFixes` since the latest diagnostic candidate escalation. Include
+supporting timestamps, the exact loop and results, rejected hypotheses,
+source/build identity, running commands, and remaining verification in the
+handoff. Repeated green runs alone are not causal progress. A diagnostic
+method reporting that it cannot reproduce the symptom is a checkpoint; it is
+not by itself evidence that only the user can unblock the work.
+
+`implementation_failed` blocks review and closeout until recovery succeeds;
+it does not automatically end the authorized task. In standalone mode the
+owning conversation applies the same recovery policy and requests a model
+change only when its approved plan or host cannot dispatch it. No incomplete
+checkpoint may claim review or closeout readiness.
 
 ## Parent-owned review repair mode
 
@@ -80,7 +129,8 @@ commit on top of the implementation commit. Confirm the starting HEAD is the
 commit supplied by the parent and the new commit's parent is that same commit.
 Return the same `ready_for_review` shape with the repair commit as `commit` and
 the original `reviewBase`. If repair or
-verification fails, return `implementation_failed` and the concrete blocker.
+verification remains incomplete, return the recovery checkpoint above; the
+parent recovers this repair before the next review round.
 Never discard user-owned changes.
 
 ## Standalone review-owner=self mode

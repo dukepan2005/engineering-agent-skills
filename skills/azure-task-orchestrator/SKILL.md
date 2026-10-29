@@ -235,7 +235,13 @@ the parent itself cannot spawn this direct Boards child.
    reject missing, unsupported, or free-form choices before dispatch. Require
    the recommendation row and execution entry to agree on this choice. Keep
    Boards helpers and the implementation candidate independent.
-9. Preserve each item's source-backed model-selection rationale and ordering
+9. Require each new execution entry to include `diagnosticCandidate`: an exact
+   supported registry recovery target, a validated run-scoped target with a
+   source-backed rationale, or explicit `null` when no higher target exists.
+   Validate availability with the planned candidate; never infer approval from
+   a profile being installed. Existing plans without this field may recover
+   locally but must obtain approval before an otherwise available escalation.
+10. Preserve each item's source-backed model-selection rationale and ordering
    explanation as `plannerEvidence` and `orderReason` in the validated delivery
    entry. The worker must receive those with the exact candidate mapping.
 
@@ -246,11 +252,16 @@ order. For every work item, include its ID, type, title, planned candidate ID,
 resolved model and supported reasoning effort (or `unset` when the model has
 no effort setting), and order reason. Also show the independently selected
 review candidate, exact model/effort, and review rationale for both axes;
-confirmation covers both implementation and review profiles. For a built-in
+confirmation covers implementation, diagnostic escalation, and review profiles. For a built-in
 implementation profile, include the
 pre-start capacity fallback profile if one exists; for an additional candidate,
 show that no fallback is defined. Claude Code and Cursor have no built-in
 pre-start fallback, so omit that column there.
+Also show each `diagnosticCandidate`, its exact model/effort (or no higher
+supported target), the escalation triggers, and the recovery budget below.
+Confirmation preauthorizes that diagnostic transition; notify the user when it
+fires and continue without another permission question. Changing scope or using
+an unapproved candidate still requires a revised plan.
 State that confirmation authorizes sequential delivery, including code changes,
 an implementation commit, a separate repair commit if findings require one,
 and Azure Boards closeout.
@@ -275,6 +286,7 @@ child directly; no child may start another child.
 | --- | --- | --- |
 | Preflight | one cheap Boards child | read-only tracker snapshot |
 | Implement | one planned-candidate child | implementation, tests, task commit |
+| Recover | one current or approved diagnostic-candidate child | diagnose the current failure, repair, verify, preserve fixed point |
 | Review rounds 1–3 | two parallel read-only children per round | Standards axis and Spec axis |
 | Repair | one same-model child after a finding round; after round 2 findings, use one higher supported implementation effort for the final repair | rerun verification and create a separate repair commit |
 | Closeout | one cheap Boards child | evidence-backed Acceptance Criteria update and close |
@@ -372,8 +384,11 @@ verification, the task-only commit, and the acceptance-evidence table are
 complete. Include `reviewBase`/`taskStartCommit`, `commit`, changed areas,
 verification evidence, remaining work, and map every supplied acceptance
 criterion to concrete evidence or state that it was not verified. If
-implementation or verification fails, return `implementation_failed` with the
-concrete blocker; do not claim review or closeout readiness.
+implementation or verification remains incomplete, return `implementation_failed`
+with the evidence-backed recovery and diagnostic checkpoint from `$azure-task-implement`;
+do not claim review or closeout readiness. Yield within 10 minutes of diagnosis
+(finish an already running bounded test first), or earlier after two rejected
+candidate fixes or a concrete external blocker.
 
 <preflight scope JSON>
 ```
@@ -381,9 +396,55 @@ concrete blocker; do not claim review or closeout readiness.
 Require the worker to finish before inspecting its result. Validate that the
 result is `ready_for_review`, that `reviewBase` and `taskStartCommit` match,
 that the commit exists, and that the acceptance-evidence table is present.
-Keep the shared workspace untouched while a worker runs. On failure,
-incomplete verification, an uncommitted result, a blocker, or an uncertain
-outcome, stop immediately. Do not dispatch later work items.
+Keep the shared workspace untouched while a worker runs. Route a valid
+`implementation_failed` checkpoint into the recovery policy below. Malformed
+results, unverified success claims or unresolved external blockers prevent
+review, closeout and later work items; they are not permission to invent success.
+
+### Autonomous recovery and diagnostic escalation
+
+A recoverable failure keeps the current work item active. Read the worker's
+`recovery` disposition and evidence, not just its outcome label. Use this same
+policy when an implementation or a review repair cannot finish verification.
+
+- `retry`: directly dispatch a diagnosis/recovery child within existing scope.
+  Reuse the current workspace and fixed `reviewBase`/`taskStartCommit`, the
+  original preflight, current loop, rejected hypotheses and any prior review
+  reports. Preserve existing commits; verified review repairs remain separate
+  commits. The parent continues to own dispatch and does not edit code.
+- `blocked`: request only the concrete missing access, permission, scope choice
+  or user-owned change resolution. An ordinary red test, incomplete fixture,
+  or absent reproduction loop alone does not establish an external blocker.
+- An approval rejection applies to the rejected operation. Continue only through
+  an explicitly justified, different permitted alternative. Retain the denial
+  and the alternative's evidence; never repeat or indirectly bypass the denied
+  action. For example, a fixture that falsely claims actual taps can be replaced
+  by genuine pointer input and resulting-state assertions when already authorized.
+  If permission for an alternative is missing or uncertain, report that boundary.
+
+Escalate when **20 minutes without new causal evidence**, **two candidate fixes
+rejected by the same symptom**, or **two consecutive incomplete handoffs** show
+that the current candidate is not converging. Use only the confirmed
+`diagnosticCandidate`, at its exact mapping; announce the reason and continue.
+Elapsed difficulty, not a promise of lower latency, is the trigger. Keep review
+profiles unchanged. At the highest candidate, continue within the remaining
+recovery budget. If a higher target exists but was not approved or is unavailable,
+report the exact missing approval/host capability rather than guessing a profile.
+
+Allow at most **three recovery dispatches per incomplete implementation or repair**.
+After that, stop and report the preserved evidence and remaining blocker; do not
+loop indefinitely or advance to the next work item. Workers checkpoint within
+10 minutes of diagnosis or after two rejected fixes, finishing an already running
+bounded test before handing over. Freeze workspace writes before switching
+workers; do not cancel a useful bounded run merely to change model. Transfer
+its outcome, source/build identity, active commands and pending verification.
+
+Recovery is complete only after the exact repro and affected verification pass
+after instrumentation cleanup, the task commit exists, and acceptance evidence
+is complete. Record `recoveryHistory` with stage, attempts, candidates, trigger
+metrics, denial/alternative evidence and results. Existing third-party diagnostic
+skills remain unchanged; their incomplete-loop results feed this policy without
+loosening their reproduction or authorization requirements.
 
 ### 3. Review and repair — parent owns flat review dispatch
 
@@ -416,8 +477,8 @@ commit, and the reports that triggered the repair. Require it to repair the
 existing delta, rerun verification, and create one separate task-only repair
 commit; it must not invoke `$code-review`, spawn a child, or perform Boards
 operations. Validate each repair commit's parent is the prior task commit and
-`reviewBase` is unchanged. If repair or verification fails, stop. After a
-successful repair, give both review workers all preceding reports and run the
+`reviewBase` is unchanged. If repair or verification remains incomplete, apply autonomous recovery
+before the next review. After a successful repair, give both review workers all preceding reports and run the
 next review round against the resulting `reviewBase...HEAD` delta.
 
 If review round 2 still has findings, raise the implementation/repair
@@ -502,7 +563,7 @@ review/repair stage, and closeout complete successfully.
 Return one ordered summary. For every completed work item, include the planned
 and effective execution candidate IDs and exact model/effort mapping, any
 pre-start capacity fallback error (Codex/ChatGPT only), `reviewBase`, initial
-implementation commit, repair commit when present, worker-reported verification,
+implementation commit, repair commit when present, worker-reported verification, diagnostic candidate and recovery history,
 completed review-round axis reports, final tracker state,
 and closeout result. For a stopped run, identify the work item and stage that
 stopped the sequence, retain earlier completed results, and state that later

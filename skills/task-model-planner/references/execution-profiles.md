@@ -127,3 +127,36 @@ pool does not change these host mappings. Run-scoped implementation additions
 do not automatically expand the review pool. Review
 profiles have no automatic capacity fallback: report an unavailable approved
 profile rather than silently changing the review configuration.
+
+
+## Diagnostic escalation
+
+These are supported recovery routes for planning, not performance guarantees or
+runtime permission. The planner includes `diagnosticCandidate` in the initial
+confirmation. Dispatch the exact approved target only when the
+[autonomous recovery gates](../../azure-task-orchestrator/SKILL.md#autonomous-recovery-and-diagnostic-escalation)
+fire. This is separate from pre-start capacity fallback and the one-level
+review-round effort escalation. Review profiles do not change.
+
+| Current implementation candidate | Diagnostic target |
+|---|---|
+| `luna-max` | `sol-max` |
+| `sol-medium` | `sol-max` |
+| `sol-high` | `sol-max` |
+| `sol-xhigh` | `sol-max` |
+| `terra-high` | `terra-max` |
+| `terra-xhigh` | `terra-max` |
+| `sonnet-medium` | `opus-max` |
+| `sonnet-high` | `opus-max` |
+| `sonnet-xhigh` | `opus-max` |
+| `opus-medium` | `opus-max` |
+| `opus-high` | `opus-max` |
+| `opus-xhigh` | `opus-max` |
+| `grok4.6-high` | `grok4.6-xhigh` |
+| `grok4.7-high` | `grok4.7-xhigh` |
+
+For `sol-max`, `terra-max`, `opus-max`, Cursor `xhigh`, and `composer2.5`, use
+explicit `null`: this registry defines no further diagnostic target. Preserve
+bounded local recovery at that ceiling. A different or run-scoped route requires
+parent validation and explicit plan approval; never infer a cross-version or
+cross-model ranking. Additional candidates have no implicit diagnostic route.

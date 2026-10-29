@@ -331,6 +331,13 @@ For each work item:
 3. Name the exact gate that disqualifies the next lower-cost profile. If no gate
    is evidenced, choose the lower profile.
 4. Give concrete escalation triggers that can be checked during implementation.
+   Select a `diagnosticCandidate` from the registry's diagnostic escalation routes,
+   or explicit `null` at a supported ceiling. A separately validated run-scoped
+   target requires the same evidence and host checks as the planned candidate.
+   Explain the choice and include the [autonomous recovery gates and budget](../azure-task-orchestrator/SKILL.md#autonomous-recovery-and-diagnostic-escalation)
+   in the confirmation plan so recovery does not require another permission
+   question. Keep diagnostic escalation separate from pre-start fallback and
+   review-round effort escalation.
 5. Assign confidence as `high`, `medium`, or `low`, based on source completeness.
 
 Keep sequencing separate from profile selection. Different work items under one
@@ -377,13 +384,14 @@ Use this structure:
 - Review candidate ID (`reviewCandidate`):
 - Review rationale (`reviewEvidence`):
 - Why this is the lowest-cost reliable profile:
-- Escalation triggers:
+- Diagnostic candidate ID (`diagnosticCandidate`, or explicit `null`):
+- Escalation triggers and recovery budget:
 - Unknowns:
 
 ## Execution plan
 
-1. AB#... — `plannedCandidate`: profile-id; `reviewCandidate`: review-profile-id; dependency or ordering reason
-2. AB#... — `plannedCandidate`: profile-id; `reviewCandidate`: review-profile-id; dependency or ordering reason
+1. AB#... — `plannedCandidate`: profile-id; `diagnosticCandidate`: diagnostic-profile-id or null; `reviewCandidate`: review-profile-id; dependency or ordering reason
+2. AB#... — `plannedCandidate`: profile-id; `diagnosticCandidate`: diagnostic-profile-id or null; `reviewCandidate`: review-profile-id; dependency or ordering reason
 
 ## Cost and sequencing summary
 - Work items by execution candidate ID:

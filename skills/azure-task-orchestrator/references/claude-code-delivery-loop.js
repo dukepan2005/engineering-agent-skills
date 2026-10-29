@@ -11,6 +11,7 @@
 //     "type": "Task",
 //     "title": "...",
 //     "plannedCandidate": "opus-medium",
+//     "diagnosticCandidate": "opus-max",
 //     "reviewCandidate": "haiku-low",
 //     "reviewEvidence": "Bounded contract with focused negative-path tests",
 //     "plannerEvidence": "...",
@@ -60,6 +61,15 @@ const NEXT_IMPLEMENTATION_CANDIDATE = {
   'sonnet-high': 'sonnet-xhigh',
   'opus-medium': 'opus-high',
   'opus-high': 'opus-xhigh',
+  'opus-xhigh': 'opus-max',
+}
+
+const DIAGNOSTIC_UPGRADES = {
+  'sonnet-medium': 'opus-max',
+  'sonnet-high': 'opus-max',
+  'sonnet-xhigh': 'opus-max',
+  'opus-medium': 'opus-max',
+  'opus-high': 'opus-max',
   'opus-xhigh': 'opus-max',
 }
 
@@ -135,7 +145,25 @@ function parseImplementation(value, label) {
   if (!result || !['ready_for_review', 'implementation_failed'].includes(result.outcome)) {
     throw new Error(`${label} must declare ready_for_review or implementation_failed`)
   }
-  if (result.outcome === 'implementation_failed') return result
+  if (result.outcome === 'implementation_failed') {
+    const recovery = result.recovery
+    if (!result.reviewBase || result.taskStartCommit !== result.reviewBase
+      || !recovery || !['retry', 'blocked'].includes(recovery.disposition)
+      || !recovery.reason || !recovery.evidence || !recovery.nextAction) {
+      throw new Error(`${label} failure requires fixed point and an evidence-backed recovery disposition`)
+    }
+    const diagnostics = result.diagnostics
+    if (!diagnostics || !Number.isFinite(diagnostics.noProgressMinutes) || diagnostics.noProgressMinutes < 0
+      || !Number.isInteger(diagnostics.rejectedFixes) || diagnostics.rejectedFixes < 0) {
+      throw new Error(`${label} failure requires nonnegative diagnostic checkpoint metrics`)
+    }
+    if (recovery.disposition === 'retry' && recovery.deniedAction
+      && (!recovery.safeAlternative || recovery.safeAlternative === recovery.deniedAction
+        || recovery.nextAction === recovery.deniedAction)) {
+      throw new Error(`${label} denied action requires a different permitted alternative`)
+    }
+    return result
+  }
   if (!result.reviewBase || result.taskStartCommit !== result.reviewBase || !result.commit) {
     throw new Error(`${label} ready_for_review requires matching reviewBase/taskStartCommit and commit`)
   }
@@ -285,6 +313,14 @@ for (const item of plan) {
     throw new Error(`plannerEvidence and orderReason are required for ${item.id || 'a work item'}`)
   }
   resolveCandidate(item.plannedCandidate)
+  if (item.diagnosticCandidate != null) {
+    resolveCandidate(item.diagnosticCandidate)
+    const expected = DIAGNOSTIC_UPGRADES[item.plannedCandidate]
+    const dynamic = item.plannedCandidate.startsWith('additional-') || item.diagnosticCandidate.startsWith('additional-')
+    if (item.diagnosticCandidate === item.plannedCandidate || (!dynamic && item.diagnosticCandidate !== expected)) {
+      throw new Error(`Unsupported diagnostic escalation for ${item.id}`)
+    }
+  }
   resolveReviewCandidate(item.reviewCandidate)
   if (!item.reviewCandidate || typeof item.reviewEvidence !== 'string' || !item.reviewEvidence.trim()) {
     throw new Error(`Built-in reviewCandidate and reviewEvidence are required for ${item.id}`)
@@ -311,6 +347,7 @@ for (let i = 0; i < plan.length; i++) {
   const repairCommits = []
   let effortEscalation = null
   let reviewRounds = []
+  const recoveryHistory = []
 
   log(`[${i + 1}/${plan.length}] ${itemId}: preflight → implement → flat review/repair → closeout`)
 
@@ -323,12 +360,50 @@ for (let i = 0; i < plan.length; i++) {
     )
     const preflightData = parsePreflight(preflightResult, itemId)
 
+    async function recoverCurrent(result, stage, reports = []) {
+      const fixedPoint = result.reviewBase
+      for (let attempt = 1; result.outcome === 'implementation_failed'; attempt++) {
+        const { recovery, diagnostics } = result
+        if (recovery.disposition === 'blocked') {
+          throw new Error(`external blocker: ${compact(recovery)}`)
+        }
+        if (attempt > 3) throw new Error(`recovery budget exhausted: ${compact(recovery)}`)
+        const stalled = diagnostics.noProgressMinutes >= 20 || diagnostics.rejectedFixes >= 2 || attempt >= 2
+        const previousCandidate = effectiveCandidate
+        if (stalled && item.diagnosticCandidate && effectiveCandidate !== item.diagnosticCandidate) {
+          effectiveCandidate = item.diagnosticCandidate
+          log(`[${itemId}] diagnostic escalation: ${previousCandidate} → ${effectiveCandidate}`)
+        } else if (stalled && !item.diagnosticCandidate && DIAGNOSTIC_UPGRADES[effectiveCandidate]) {
+          throw new Error(`approved diagnostic candidate required: ${compact(recovery)}`)
+        }
+        recoveryHistory.push({ stage, attempt, fromCandidate: previousCandidate, candidateId: effectiveCandidate,
+          mapping: describeCandidate(effectiveCandidate), recovery, diagnostics })
+        phase('Diagnose and recover')
+        const resumed = await agent(
+          `Use \`$azure-task-implement\` with \`reviewOwner=parent\` to diagnose and recover the current ${stage} of ${itemId}. Continue only this authorized work item. Preserve the workspace, reviewBase/taskStartCommit ${fixedPoint}, existing commits and acceptance scope. Build or reuse the exact red-capable loop before a causal fix; use permitted local alternatives for recoverable tool/environment failures. Do not repeat or indirectly bypass the denied action. A denied action is not permission to retry it. Report an external blocker only when evidence shows no permitted local recovery remains. Do not invoke \`$code-review\`, spawn a child, or perform Boards operations.
+Checkpoint within 10 minutes (finish an already running bounded test first); hand back earlier after two rejected candidate fixes or a concrete external blocker. Return implementation_failed with recovery/diagnostics for an incomplete checkpoint; it requests continued recovery, not review. On success, rerun affected verification after cleanup, preserve/create the task-only unpushed commit (a separate repair commit for review repairs), and return ready_for_review. No review or closeout before verification and commit are complete.
+Effective candidate: ${effectiveCandidate}
+Exact mapping: ${JSON.stringify(describeCandidate(effectiveCandidate))}
+Recovery attempt: ${attempt}/3. Measure noProgressMinutes since the last new causal evidence and rejectedFixes since the latest candidate escalation; include the evidence/timestamps. Keep this candidate fixed during the worker turn. Hand off the current loop, rejected hypotheses, source/build identity, running commands and remaining checks; do not restart a settled experiment.
+Preflight scope: ${JSON.stringify(preflightData)}
+Previous checkpoint: ${JSON.stringify(result)}
+Preceding review reports: ${JSON.stringify(reports)}`,
+          agentOptions(resolveCandidate(effectiveCandidate), `diagnose_${stage}_${attempt}_${itemId}`)
+        )
+        result = parseImplementation(resumed, `recovery ${itemId}`)
+        recoveryHistory.at(-1).outcome = result.outcome
+        recoveryHistory.at(-1).commit = result.commit
+        if (result.reviewBase !== fixedPoint) throw new Error('recovery must preserve reviewBase')
+      }
+      return result
+    }
+
     // === STEP 2: Implement ===
     phase('Implement')
     const candidate = resolveCandidate(effectiveCandidate)
     const candidateMapping = describeCandidate(effectiveCandidate)
     const implementationResult = await agent(
-      `Use \`$azure-task-implement\` with \`reviewOwner=parent\` to implement work item ${itemId} in the current workspace and branch. The effective model/effort candidate is fixed. Do not invoke \`$code-review\`, spawn any child, or perform Azure Boards operations. Return JSON only using the implementation Skill's ready_for_review or implementation_failed contract.
+      `Use \`$azure-task-implement\` with \`reviewOwner=parent\` to implement work item ${itemId} in the current workspace and branch. The effective model/effort candidate is fixed. Do not invoke \`$code-review\`, spawn any child, or perform Azure Boards operations. Return JSON only using the implementation Skill's ready_for_review or implementation_failed contract. For incomplete work, include evidence-backed recovery and diagnostics. Checkpoint within 10 minutes of diagnosis (finish an already running bounded test first), or earlier after two rejected fixes; do not wait indefinitely for a result before returning control to the parent.
 
 Planned candidate: ${plannedCandidate}
 Effective candidate: ${effectiveCandidate}
@@ -343,9 +418,7 @@ ${JSON.stringify(preflightData, null, 2)}
       agentOptions(candidate, `delivery_${plannedCandidate}_${itemId}`)
     )
     implementation = parseImplementation(implementationResult, `implementation ${itemId}`)
-    if (implementation.outcome === 'implementation_failed') {
-      throw new Error(`implementation failed: ${compact(implementation.blocker || implementation.remainingWork || implementation)}`)
-    }
+    implementation = await recoverCurrent(implementation, 'implementation')
     implementationCommit = implementation.commit
 
     // === STEP 3: Review and repair, with one effort escalation before round 3 ===
@@ -394,7 +467,7 @@ ${JSON.stringify(preflightData, null, 2)}
       }
 
       const priorTaskCommit = implementation.commit
-      const repaired = await runRepair({
+      let repaired = await runRepair({
         item,
         implementation,
         preflightData,
@@ -403,9 +476,7 @@ ${JSON.stringify(preflightData, null, 2)}
         label: round === 2 ? 'Final_repair_escalated' : `Repair_round_${round}`,
         phaseLabel: round === 2 ? 'Final repair at higher effort' : 'Repair after review round 1',
       })
-      if (repaired.outcome === 'implementation_failed') {
-        throw new Error(`repair failed: ${compact(repaired.blocker || repaired.remainingWork || repaired)}`)
-      }
+      repaired = await recoverCurrent(repaired, 'repair', reviewRounds.flat())
       if (repaired.reviewBase !== implementation.reviewBase || repaired.commit === implementation.commit) {
         throw new Error('repair must preserve reviewBase and return a new commit')
       }
@@ -426,6 +497,7 @@ ${JSON.stringify(preflightData, null, 2)}
         repairCommit: repairCommits.at(-1) || null,
         repairCommits,
         effortEscalation,
+        recoveryHistory,
         status: 'review_action_required',
         ...reviewActionRequired,
         reviewRounds,
@@ -460,6 +532,7 @@ ${implementationSummary}`,
       repairCommit,
       repairCommits,
       effortEscalation,
+      recoveryHistory,
       commit: implementation.commit,
       verification: implementation.verification,
       reviewRounds,
@@ -479,6 +552,7 @@ ${implementationSummary}`,
       repairCommit: repairCommits.at(-1) || null,
       repairCommits,
       effortEscalation,
+      recoveryHistory,
       status: 'delivery_failed',
       error: error.message,
       reviewRounds,

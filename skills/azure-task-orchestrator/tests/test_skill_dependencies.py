@@ -11,6 +11,35 @@ class SkillDependencyContractTests(unittest.TestCase):
     def read_skill(self, name: str) -> str:
         return (REPO_ROOT / "skills" / name / "SKILL.md").read_text()
 
+    def test_recovery_contract_is_shared_by_planner_implementer_and_orchestrator(self) -> None:
+        orchestrator = self.read_skill("azure-task-orchestrator")
+        implementer = self.read_skill("azure-task-implement")
+        planner = self.read_skill("task-model-planner")
+        for text in (implementer, planner):
+            self.assertIn("#autonomous-recovery-and-diagnostic-escalation", text)
+        for field in ("diagnosticCandidate", "recoveryHistory"):
+            self.assertIn(field, orchestrator)
+        for field in ("recovery", "disposition", "diagnostics", "noProgressMinutes", "rejectedFixes"):
+            self.assertIn(f'"{field}"', implementer)
+        self.assertIn("diagnosticCandidate", planner)
+        self.assertIn("three recovery dispatches", orchestrator)
+        self.assertIn("third-party diagnostic", orchestrator)
+        self.assertNotIn("outcome, stop immediately", orchestrator)
+
+    def test_diagnostic_routes_match_registry_and_template(self) -> None:
+        registry = (REPO_ROOT / "skills/task-model-planner/references/execution-profiles.md").read_text()
+        routes = dict(re.findall(r"^\| `([^`]+)` \| `([^`]+)` \|$", registry.split("## Diagnostic escalation", 1)[1], re.MULTILINE))
+        script = (REPO_ROOT / "skills/azure-task-orchestrator/references/claude-code-delivery-loop.js").read_text()
+        mapping = script.split("const DIAGNOSTIC_UPGRADES = {", 1)[1].split("}", 1)[0]
+        actual = dict(re.findall(r"'([^']+)': '([^']+)'", mapping))
+        expected = {source: target for source, target in routes.items() if source.startswith(("sonnet-", "opus-"))}
+        self.assertEqual(actual, expected)
+        self.assertEqual(routes["sol-high"], "sol-max")
+        self.assertEqual(routes["terra-high"], "terra-max")
+        self.assertIn("diagnostics.noProgressMinutes >= 20", script)
+        self.assertIn("diagnostics.rejectedFixes >= 2", script)
+        self.assertIn("attempt > 3", script)
+
     def test_orchestrator_uses_skill_names_without_source_provenance(self) -> None:
         text = self.read_skill("azure-task-orchestrator")
 
