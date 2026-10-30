@@ -13,6 +13,7 @@ import sys
 
 RELATIONS = {"parent": "System.LinkTypes.Hierarchy-Reverse", "predecessor": "System.LinkTypes.Dependency-Reverse", "related": "System.LinkTypes.Related"}
 PLANNING_TYPES = ("Task", "Bug")
+ACCEPTANCE_CRITERIA_TYPES = ("User Story", "Task", "Bug")
 PLANNING_PARENT_TYPES = ("Story", "User Story")
 PLANNING_STATE = "New"
 SEARCH_TYPES = ("Epic", "Feature", "User Story", "Task", "Bug")
@@ -398,6 +399,8 @@ def preflight(args):
     client = connect(args)[0]
     item = client.read(args.id)
     fields = item.get("fields", {})
+    if getattr(args, "require_acceptance_criteria", False) and not html.unescape(fields.get(ACCEPTANCE_CRITERIA_FIELD, "") or "").strip():
+        raise RuntimeError("The native Acceptance Criteria field must not be empty.")
     comments = client.read_comments(args.id)
     emit({"id": item.get("id", args.id), "rev": item.get("rev"),
           "type": fields.get("System.WorkItemType"), "state": fields.get("System.State"),
@@ -654,8 +657,8 @@ def create(args):
     if args.type != "Bug" and any(value is not None for value in (repro_steps_file, system_info_file)):
         raise RuntimeError("Bug-specific fields require --type Bug.")
     if acceptance_criteria_file is not None:
-        if args.type not in PLANNING_TYPES:
-            raise RuntimeError("Acceptance Criteria requires --type Task or Bug.")
+        if args.type not in ACCEPTANCE_CRITERIA_TYPES:
+            raise RuntimeError("Acceptance Criteria requires --type User Story, Task or Bug.")
         value = _read_markdown_field(acceptance_criteria_file, ACCEPTANCE_CRITERIA_FIELD)
         document.append(op(cls, "add", f"/fields/{ACCEPTANCE_CRITERIA_FIELD}", value))
         document.append(op(cls, "add", f"/multilineFieldsFormat/{ACCEPTANCE_CRITERIA_FIELD}", "markdown"))
@@ -742,8 +745,8 @@ def update(args):
     acceptance_criteria_file = getattr(args, "acceptance_criteria_file", None)
     if acceptance_criteria_file is not None:
         item_type = before.get("fields", {}).get("System.WorkItemType")
-        if item_type not in PLANNING_TYPES:
-            raise RuntimeError("Acceptance Criteria requires a Task or Bug work item.")
+        if item_type not in ACCEPTANCE_CRITERIA_TYPES:
+            raise RuntimeError("Acceptance Criteria requires a User Story, Task or Bug work item.")
         value = _read_markdown_field(acceptance_criteria_file, ACCEPTANCE_CRITERIA_FIELD)
         document.append(op(cls, "add", f"/fields/{ACCEPTANCE_CRITERIA_FIELD}", value))
         document.append(op(cls, "add", f"/multilineFieldsFormat/{ACCEPTANCE_CRITERIA_FIELD}", "markdown"))
@@ -916,11 +919,11 @@ def parser():
     search.add_argument("--title-contains", required=True); search.add_argument("--type", dest="types", choices=SEARCH_TYPES, action="append", required=True)
     search.add_argument("--limit", type=int, default=50); search.set_defaults(run=search_items)
     snapshot = commands.add_parser("planning-snapshot"); connection(snapshot); snapshot_ids = snapshot.add_mutually_exclusive_group(required=True); snapshot_ids.add_argument("--story", type=int); snapshot_ids.add_argument("--id", dest="item_ids", action="append", type=int, metavar="ID"); snapshot.set_defaults(run=planning_snapshot)
-    preflight_p = commands.add_parser("implement-preflight"); connection(preflight_p); preflight_p.add_argument("--id", type=int, required=True); preflight_p.set_defaults(run=preflight)
-    create_p = commands.add_parser("create"); connection(create_p, True); create_p.add_argument("--apply", action="store_true"); create_p.add_argument("--type", choices=("Epic", "Feature", "User Story", "Task", "Bug"), required=True); create_p.add_argument("--title", required=True); create_p.add_argument("--description-file", type=Path, required=True); create_p.add_argument("--acceptance-criteria-file", type=Path, help="Task- or Bug-only Markdown for Microsoft.VSTS.Common.AcceptanceCriteria"); create_p.add_argument("--repro-steps-file", type=Path, help="Bug-only Markdown rendered as HTML for Microsoft.VSTS.TCM.ReproSteps"); create_p.add_argument("--system-info-file", type=Path, help="Bug-only Markdown rendered as HTML for Microsoft.VSTS.TCM.SystemInfo"); create_p.add_argument("--comment-file", type=Path, help="Optional initial Markdown comment; for a Bug without --repro-steps-file it becomes HTML Repro Steps"); create_p.add_argument("--iteration"); create_p.add_argument("--tags", action="append", default=[])
+    preflight_p = commands.add_parser("implement-preflight"); connection(preflight_p); preflight_p.add_argument("--id", type=int, required=True); preflight_p.add_argument("--require-acceptance-criteria", action="store_true", help="Fail if the native Acceptance Criteria field is empty"); preflight_p.set_defaults(run=preflight)
+    create_p = commands.add_parser("create"); connection(create_p, True); create_p.add_argument("--apply", action="store_true"); create_p.add_argument("--type", choices=("Epic", "Feature", "User Story", "Task", "Bug"), required=True); create_p.add_argument("--title", required=True); create_p.add_argument("--description-file", type=Path, required=True); create_p.add_argument("--acceptance-criteria-file", type=Path, help="User Story, Task or Bug Markdown for Microsoft.VSTS.Common.AcceptanceCriteria"); create_p.add_argument("--repro-steps-file", type=Path, help="Bug-only Markdown rendered as HTML for Microsoft.VSTS.TCM.ReproSteps"); create_p.add_argument("--system-info-file", type=Path, help="Bug-only Markdown rendered as HTML for Microsoft.VSTS.TCM.SystemInfo"); create_p.add_argument("--comment-file", type=Path, help="Optional initial Markdown comment; for a Bug without --repro-steps-file it becomes HTML Repro Steps"); create_p.add_argument("--iteration"); create_p.add_argument("--tags", action="append", default=[])
     for kind in RELATIONS: create_p.add_argument(f"--{kind}", action="append", type=int, default=[])
     create_p.set_defaults(run=create)
-    update_p = commands.add_parser("update"); connection(update_p); update_p.add_argument("--apply", action="store_true"); update_p.add_argument("--id", type=int, required=True); update_p.add_argument("--title"); update_p.add_argument("--description-file", type=Path); update_p.add_argument("--acceptance-criteria-file", type=Path, help="Task- or Bug-only Markdown for Microsoft.VSTS.Common.AcceptanceCriteria"); update_p.add_argument("--repro-steps-file", type=Path, help="Bug-only Markdown rendered as HTML Repro Steps"); update_p.add_argument("--system-info-file", type=Path, help="Bug-only Markdown rendered as HTML System Info"); update_p.add_argument("--state"); update_p.add_argument("--iteration"); update_p.add_argument("--tags", action="append", default=[]); update_p.set_defaults(run=update)
+    update_p = commands.add_parser("update"); connection(update_p); update_p.add_argument("--apply", action="store_true"); update_p.add_argument("--id", type=int, required=True); update_p.add_argument("--title"); update_p.add_argument("--description-file", type=Path); update_p.add_argument("--acceptance-criteria-file", type=Path, help="User Story, Task or Bug Markdown for Microsoft.VSTS.Common.AcceptanceCriteria"); update_p.add_argument("--repro-steps-file", type=Path, help="Bug-only Markdown rendered as HTML Repro Steps"); update_p.add_argument("--system-info-file", type=Path, help="Bug-only Markdown rendered as HTML System Info"); update_p.add_argument("--state"); update_p.add_argument("--iteration"); update_p.add_argument("--tags", action="append", default=[]); update_p.set_defaults(run=update)
     update_p.add_argument("--assigned-to", metavar="UNIQUE_NAME", help="Assign by Azure identity uniqueName (usually email); blank values are rejected")
     update_p.add_argument("--expected-rev", type=int, help="Revision used to prepare the update; stale revisions are rejected without retry")
     move_p = commands.add_parser("move", help="move one work item to another project")

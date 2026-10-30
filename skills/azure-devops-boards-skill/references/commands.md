@@ -22,10 +22,10 @@ Read the repository's tracker instructions before operating. Treat its work-item
 - Read the relevant work item before changing it.
 - Do not search for duplicate work items before creating one. Create directly — the caller knows what it intends to create, and pre-creation duplicate queries cost more than the occasional duplicate they would prevent. Only search for existing items when the user explicitly asks to check.
 - Prepare long descriptions and comments in temporary Markdown files.
-- Keep Task/Bug Acceptance Criteria in the native
+- Keep implementation User Story/Task/Bug Acceptance Criteria in the native
   `Microsoft.VSTS.Common.AcceptanceCriteria` field via
   `--acceptance-criteria-file`; keep `System.Description` for descriptive
-  context and never put Acceptance Criteria there.
+  context. Follow repository rules for decision-only Stories.
 - At closeout, synchronize only evidence-backed checklist items in the native
   Acceptance Criteria field, preserve Description, and post the completion
   comment in the same call. `--check-ac` is an opt-in server-side alternative
@@ -51,6 +51,7 @@ sh "$HELPER" search --organization "$AZURE_DEVOPS_ORG" --project "$AZURE_DEVOPS_
 sh "$HELPER" planning-snapshot --story 61 # Story + direct New Task/Bug targets only
 sh "$HELPER" planning-snapshot --id 123 --id 124 # explicit Task/Bug set, stable input order
 sh "$HELPER" implement-preflight --id 61
+sh "$HELPER" implement-preflight --id 61 --require-acceptance-criteria # fail when native AC is empty
 
 sh "$HELPER" create \
   --type Task --title 'Implement contract' \
@@ -101,7 +102,8 @@ sh "$HELPER" close-task \
 
 Add `--apply` after validation. `--description-file` updates Description;
 `--acceptance-criteria-file` separately updates the native Acceptance Criteria
-field for Tasks and Bugs. Both may be used in one command. `--check-ac` reads
+field for User Stories, Tasks and Bugs. Both may be used in one command.
+`--check-ac` reads
 that native field, checks matching Markdown checkboxes (`all`, or a
 case-insensitive fragment that must uniquely match exactly one item —
 ambiguous fragments raise), and patches it back in the same mutation. It is

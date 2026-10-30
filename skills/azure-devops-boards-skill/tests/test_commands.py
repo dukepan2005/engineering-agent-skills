@@ -119,6 +119,28 @@ class CreateCommandTests(unittest.TestCase):
         self.assertEqual(stored["multilineFieldsFormat"]["Microsoft.VSTS.Common.AcceptanceCriteria"],
                          "markdown")
 
+    def test_user_story_creation_writes_acceptance_criteria_separately(self):
+        fake = FakeClient()
+        args = self._args(apply=True, text="Story context")
+        args.type = "User Story"
+        args.acceptance_criteria_file = _file("- [ ] User can complete the flow")
+        out = _run(create, fake, args)
+        stored = fake.read(out["id"])
+        self.assertEqual(stored["fields"]["System.Description"], "Story context")
+        self.assertEqual(stored["fields"]["Microsoft.VSTS.Common.AcceptanceCriteria"],
+                         "- [ ] User can complete the flow")
+        self.assertEqual(stored["multilineFieldsFormat"]["Microsoft.VSTS.Common.AcceptanceCriteria"],
+                         "markdown")
+
+    def test_user_story_rejects_empty_acceptance_criteria(self):
+        fake = FakeClient()
+        args = self._args(apply=True)
+        args.type = "User Story"
+        args.acceptance_criteria_file = _file("  \n")
+        with self.assertRaisesRegex(RuntimeError, "must not be empty"):
+            _run(create, fake, args)
+        self.assertEqual(fake.applies, 0)
+
     def test_bug_creation_persists_repro_steps_and_system_info_fields(self):
         fake = FakeClient()
         args = self._args(apply=True)
@@ -143,7 +165,7 @@ class CreateCommandTests(unittest.TestCase):
         args = self._args(apply=True)
         args.type = "Epic"
         args.acceptance_criteria_file = _file("- [ ] Criterion")
-        with self.assertRaisesRegex(RuntimeError, "Acceptance Criteria requires --type Task or Bug"):
+        with self.assertRaisesRegex(RuntimeError, "Acceptance Criteria requires --type User Story, Task or Bug"):
             _run(create, FakeClient(), args)
 
     def test_bug_creation_uses_initial_comment_as_repro_steps_when_field_is_absent(self):
@@ -302,9 +324,26 @@ class UpdateCommandTests(unittest.TestCase):
         self.assertEqual(stored["multilineFieldsFormat"]["Microsoft.VSTS.Common.AcceptanceCriteria"],
                          "markdown")
 
+    def test_user_story_acceptance_criteria_update_preserves_other_fields(self):
+        fake = FakeClient.with_item(42, rev=3, item_type="User Story")
+        fake.items[42]["fields"].update({"System.Description": "Original story", "System.State": "New"})
+        fake.items[42]["relations"] = [{"rel": "System.LinkTypes.Related", "url": "https://example.test/7"}]
+        before = fake.read(42)
+        args = self._args(apply=True, state=None,
+                          acceptance_criteria_file=_file("- [ ] Criterion"))
+        args.expected_rev = 3
+        out = _run(update, fake, args)
+        stored = fake.read(42)
+        self.assertEqual(out["mode"], "applied")
+        self.assertEqual(stored["fields"]["Microsoft.VSTS.Common.AcceptanceCriteria"], "- [ ] Criterion")
+        self.assertEqual(stored["multilineFieldsFormat"]["Microsoft.VSTS.Common.AcceptanceCriteria"], "markdown")
+        self.assertEqual(stored["fields"]["System.Description"], before["fields"]["System.Description"])
+        self.assertEqual(stored["fields"]["System.State"], before["fields"]["System.State"])
+        self.assertEqual(stored["relations"], before["relations"])
+
     def test_acceptance_criteria_update_rejects_other_work_item_types(self):
-        fake = FakeClient.with_item(42, item_type="User Story")
-        with self.assertRaisesRegex(RuntimeError, "Acceptance Criteria requires a Task or Bug"):
+        fake = FakeClient.with_item(42, item_type="Epic")
+        with self.assertRaisesRegex(RuntimeError, "Acceptance Criteria requires"):
             _run(update, fake, self._args(
                 apply=True, state=None,
                 acceptance_criteria_file=_file("- [ ] Criterion"),
@@ -458,6 +497,22 @@ class ImplementationLifecycleTests(unittest.TestCase):
             "description": "Implementation context",
         })
         self.assertEqual(out["relations"], [{"rel": RELATIONS["predecessor"], "targetId": 7}])
+
+    def test_preflight_can_require_native_acceptance_criteria(self):
+        args = SimpleNamespace(organization=ORG, project=PROJECT, id=self.ID,
+                               require_acceptance_criteria=True)
+        for value in (None, "", "  "):
+            with self.subTest(value=value):
+                fake = self._seeded()
+                fake.items[self.ID]["fields"]["System.Description"] = "## Acceptance Criteria\n- [ ] In description"
+                if value is None:
+                    fake.items[self.ID]["fields"].pop("Microsoft.VSTS.Common.AcceptanceCriteria")
+                else:
+                    fake.items[self.ID]["fields"]["Microsoft.VSTS.Common.AcceptanceCriteria"] = value
+                with self.assertRaisesRegex(RuntimeError, "native Acceptance Criteria"):
+                    _run(preflight, fake, args)
+        out = _run(preflight, self._seeded(), args)
+        self.assertEqual(out["scope"]["source"], "acceptance-criteria-field")
 
     def test_description_checklist_is_not_misreported_as_acceptance_criteria(self):
         fake = self._seeded()
