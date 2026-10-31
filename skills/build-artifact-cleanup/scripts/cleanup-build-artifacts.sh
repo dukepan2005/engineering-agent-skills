@@ -2,19 +2,27 @@
 set -euo pipefail
 
 ROOT_DIR="$PWD"
+ROOT_DIR_PROVIDED=false
 APPLY=false
 APPROVAL_TOKEN=""
+EXPLICIT_MODE=false
+EXPLICIT_TARGET_PATHS=()
+PRESERVE_PATHS=()
 
 usage() {
   cat <<'USAGE'
-Inventory or clean generated FlowCoach iOS and Go API build/test artifacts.
+Inventory or clean generated FlowCoach iOS and Go API build/test artifacts,
+or explicitly selected build/test targets in a safe workspace.
 
 Usage:
   cleanup-build-artifacts.sh [--root <FlowCoach-workspace-or-repo>] [--apply --approval-token <sha256>]
+  cleanup-build-artifacts.sh --root <workspace> --target <relative-path>... [--preserve <relative-path>...] [--apply --approval-token <sha256>]
 
 The default is a dry run. --apply requires the token from the exact previewed
-inventory and checks that Xcode, Swift, Go builds, and tests are idle. Go module
-downloads and reusable Xcode package/module/compilation caches are retained.
+inventory and checks that build/test processes are idle. Go module downloads
+and reusable Xcode package/module/compilation caches are retained.
+Explicit targets are exact relative paths (no globbing) under a project subdirectory
+of the user home or temporary directory; --preserve protects paths within it.
 USAGE
 }
 
@@ -28,6 +36,17 @@ while [[ $# -gt 0 ]]; do
     --root)
       [[ $# -ge 2 ]] || fail '--root requires a path'
       ROOT_DIR="$2"
+      ROOT_DIR_PROVIDED=true
+      shift 2
+      ;;
+    --target)
+      [[ $# -ge 2 ]] || fail '--target requires a relative path'
+      EXPLICIT_TARGET_PATHS+=("$2")
+      shift 2
+      ;;
+    --preserve)
+      [[ $# -ge 2 ]] || fail '--preserve requires a relative path'
+      PRESERVE_PATHS+=("$2")
       shift 2
       ;;
     --apply)
@@ -53,30 +72,40 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ ${#EXPLICIT_TARGET_PATHS[@]} -gt 0 || ${#PRESERVE_PATHS[@]} -gt 0 ]]; then
+  EXPLICIT_MODE=true
+fi
+[[ "$EXPLICIT_MODE" != true || "$ROOT_DIR_PROVIDED" == true ]] || fail '--target/--preserve require --root'
+[[ "$EXPLICIT_MODE" != true || ${#EXPLICIT_TARGET_PATHS[@]} -gt 0 ]] || fail '--preserve requires at least one --target'
 [[ "$APPLY" == true || -z "$APPROVAL_TOKEN" ]] || fail '--approval-token requires --apply'
 [[ -d "$ROOT_DIR" ]] || fail "workspace or repository not found: $ROOT_DIR"
+[[ "$EXPLICIT_MODE" != true || ! -L "$ROOT_DIR" ]] || fail "refusing symlinked explicit workspace: $ROOT_DIR"
 ROOT_DIR="$(cd "$ROOT_DIR" && pwd -P)"
 
 IOS_ROOT=""
 API_ROOT=""
-ROOT_NAME="${ROOT_DIR##*/}"
-if [[ -d "$ROOT_DIR/flowcoach-ios" ]]; then
-  [[ ! -L "$ROOT_DIR/flowcoach-ios" ]] || fail "refusing symlinked FlowCoach iOS repository: $ROOT_DIR/flowcoach-ios"
-  IOS_ROOT="$ROOT_DIR/flowcoach-ios"
-elif [[ "$ROOT_NAME" == "flowcoach-ios" && ( -d "$ROOT_DIR/.derived_data" || -f "$ROOT_DIR/Podfile" ) ]]; then
-  IOS_ROOT="$ROOT_DIR"
+if [[ "$EXPLICIT_MODE" != true ]]; then
+  ROOT_NAME="${ROOT_DIR##*/}"
+  if [[ -d "$ROOT_DIR/flowcoach-ios" ]]; then
+    [[ ! -L "$ROOT_DIR/flowcoach-ios" ]] || fail "refusing symlinked FlowCoach iOS repository: $ROOT_DIR/flowcoach-ios"
+    IOS_ROOT="$ROOT_DIR/flowcoach-ios"
+  elif [[ "$ROOT_NAME" == "flowcoach-ios" && ( -d "$ROOT_DIR/.derived_data" || -f "$ROOT_DIR/Podfile" ) ]]; then
+    IOS_ROOT="$ROOT_DIR"
+  fi
+  if [[ -d "$ROOT_DIR/flowcoach-api" && -f "$ROOT_DIR/flowcoach-api/go.mod" ]]; then
+    [[ ! -L "$ROOT_DIR/flowcoach-api" ]] || fail "refusing symlinked FlowCoach API repository: $ROOT_DIR/flowcoach-api"
+    API_ROOT="$ROOT_DIR/flowcoach-api"
+  elif [[ "$ROOT_NAME" == "flowcoach-api" && -f "$ROOT_DIR/go.mod" ]]; then
+    API_ROOT="$ROOT_DIR"
+  fi
+  [[ -n "$IOS_ROOT" || -n "$API_ROOT" ]] || fail 'expected a FlowCoach workspace, iOS repository, or Go API repository'
 fi
-if [[ -d "$ROOT_DIR/flowcoach-api" && -f "$ROOT_DIR/flowcoach-api/go.mod" ]]; then
-  [[ ! -L "$ROOT_DIR/flowcoach-api" ]] || fail "refusing symlinked FlowCoach API repository: $ROOT_DIR/flowcoach-api"
-  API_ROOT="$ROOT_DIR/flowcoach-api"
-elif [[ "$ROOT_NAME" == "flowcoach-api" && -f "$ROOT_DIR/go.mod" ]]; then
-  API_ROOT="$ROOT_DIR"
-fi
-[[ -n "$IOS_ROOT" || -n "$API_ROOT" ]] || fail 'expected a FlowCoach workspace, iOS repository, or Go API repository'
 
 TARGETS=()
 IOS_TARGETS=()
 GO_TARGETS=()
+SCRATCH_TARGETS=()
+PROTECTED_PATHS=()
 GO_CACHE=""
 GO_MOD_CACHE=""
 GO_TMP_DIR=""
@@ -130,6 +159,43 @@ normalize_system_temp() {
   printf '%s\n' "$physical"
 }
 
+validate_relative_path() {
+  local relative="$1"
+  local label="$2"
+  local component
+  local -a components=()
+  [[ -n "$relative" && "$relative" != /* && "$relative" != */ && "$relative" != *//* && "$relative" != *$'\n'* && "$relative" != *$'\r'* ]] || fail "refusing unsafe $label path: $relative"
+  IFS='/' read -r -a components <<< "$relative"
+  for component in "${components[@]}"; do
+    [[ -n "$component" && "$component" != "." && "$component" != ".." ]] || fail "refusing unsafe $label path: $relative"
+  done
+}
+
+if [[ "$EXPLICIT_MODE" == true ]]; then
+  TEMP_ROOT="$(normalize_system_temp "${TMPDIR:-/private/tmp}")"
+  ROOT_ALLOWED=false
+  if [[ "$ROOT_DIR" != "$USER_HOME" ]] && path_is_within "$ROOT_DIR" "$USER_HOME"; then ROOT_ALLOWED=true; fi
+  if [[ "$ROOT_DIR" != /private/tmp ]] && path_is_within "$ROOT_DIR" /private/tmp; then ROOT_ALLOWED=true; fi
+  if [[ "$ROOT_DIR" != "$TEMP_ROOT" ]] && path_is_within "$ROOT_DIR" "$TEMP_ROOT"; then ROOT_ALLOWED=true; fi
+  [[ "$ROOT_ALLOWED" == true ]] || fail "explicit workspace must be within the user home or a temporary directory: $ROOT_DIR"
+  for broad_path in /Users /private /private/var /private/var/folders /private/tmp /System /System/Volumes /Applications /Volumes "$USER_HOME" "$USER_HOME/Library" "$USER_HOME/Library/Caches" "$USER_HOME/Library/Developer" "$TEMP_ROOT"; do
+    [[ "$ROOT_DIR" != "$broad_path" ]] || fail "refusing broad explicit workspace: $ROOT_DIR"
+  done
+  for relative_path in "${EXPLICIT_TARGET_PATHS[@]}"; do
+    validate_relative_path "$relative_path" 'target'
+  done
+  for relative_path in "${PRESERVE_PATHS[@]}"; do
+    validate_relative_path "$relative_path" 'preserved'
+    candidate="$ROOT_DIR/$relative_path"
+    [[ -e "$candidate" || -L "$candidate" ]] || fail "preserved path not found: $candidate"
+    [[ ! -L "$candidate" ]] || fail "refusing symlinked preserved path: $candidate"
+    parent="${candidate%/*}"
+    real_parent="$(cd "$parent" && pwd -P)" || fail "cannot resolve preserved path parent: $parent"
+    path_is_within "$real_parent" "$ROOT_DIR" || fail "preserved path resolves outside the workspace: $candidate"
+    PROTECTED_PATHS+=("$real_parent/${candidate##*/}")
+  done
+fi
+
 normalize_go_temp() {
   local path="$1"
   local physical
@@ -151,12 +217,20 @@ add_target() {
   local candidate="$1"
   local category="$2"
   local boundary="$3"
-  local existing parent real_parent
+  local existing parent real_parent protected_path
   [[ -e "$candidate" || -L "$candidate" ]] || return 0
   [[ ! -L "$candidate" ]] || fail "refusing symlinked cleanup target: $candidate"
   parent="${candidate%/*}"
   real_parent="$(cd "$parent" && pwd -P)" || fail "cannot resolve cleanup target parent: $parent"
   path_is_within "$real_parent" "$boundary" || fail "cleanup target resolves outside its allowed directory: $candidate"
+  if [[ "$EXPLICIT_MODE" == true ]]; then
+    candidate="$real_parent/${candidate##*/}"
+    for protected_path in "${PROTECTED_PATHS[@]}"; do
+      if [[ "$candidate" == "$protected_path" ]] || path_is_within "$candidate" "$protected_path" || path_is_within "$protected_path" "$candidate"; then
+        fail "cleanup target overlaps preserved path: $candidate ($protected_path)"
+      fi
+    done
+  fi
   if [[ -n "$GO_CACHE" ]]; then
     path_is_within "$candidate" "$GO_CACHE" && return 0
     path_is_within "$GO_CACHE" "$candidate" && fail "cleanup target contains the Go build cache: $candidate"
@@ -168,12 +242,16 @@ add_target() {
   if [[ ${#TARGETS[@]} -gt 0 ]]; then
     for existing in "${TARGETS[@]}"; do
       [[ "$existing" == "$candidate" ]] && return 0
+      if [[ "$EXPLICIT_MODE" == true ]] && { path_is_within "$candidate" "$existing" || path_is_within "$existing" "$candidate"; }; then
+        fail "overlapping explicit cleanup targets: $existing and $candidate"
+      fi
     done
   fi
   TARGETS+=("$candidate")
   case "$category" in
     ios) IOS_TARGETS+=("$candidate") ;;
     go) GO_TARGETS+=("$candidate") ;;
+    scratch) SCRATCH_TARGETS+=("$candidate") ;;
     *) fail "unknown cleanup category: $category" ;;
   esac
 }
@@ -200,9 +278,17 @@ collect_targets() {
   TARGETS=()
   IOS_TARGETS=()
   GO_TARGETS=()
+  SCRATCH_TARGETS=()
   GO_CACHE=""
   GO_MOD_CACHE=""
   GO_TMP_DIR=""
+
+  if [[ "$EXPLICIT_MODE" == true ]]; then
+    for relative_path in "${EXPLICIT_TARGET_PATHS[@]}"; do
+      add_target "$ROOT_DIR/$relative_path" scratch "$ROOT_DIR"
+    done
+    return 0
+  fi
 
   if [[ -n "$IOS_ROOT" ]]; then
     for relative_path in \
@@ -275,6 +361,7 @@ print_size() {
     case "$category" in
       ios) IOS_BYTES=$((IOS_BYTES + size)) ;;
       go) GO_BYTES=$((GO_BYTES + size)) ;;
+      scratch) SCRATCH_BYTES=$((SCRATCH_BYTES + size)) ;;
       *) fail "unknown cleanup category: $category" ;;
     esac
   else
@@ -284,7 +371,7 @@ print_size() {
 }
 
 inventory_token() {
-  local target size digest
+  local target size digest relative_path
   command -v shasum >/dev/null 2>&1 || return 1
   digest="$(
     {
@@ -298,6 +385,21 @@ inventory_token() {
         size="$(path_size_bytes "$target")" || exit 1
         printf 'go\0%s\0%s\0' "$target" "$size"
       done
+      if [[ "$EXPLICIT_MODE" == true ]]; then
+        printf 'explicit-root\0%s\0' "$ROOT_DIR"
+        for relative_path in "${EXPLICIT_TARGET_PATHS[@]}"; do
+          target="$ROOT_DIR/$relative_path"
+          if [[ -e "$target" || -L "$target" ]]; then
+            size="$(path_size_bytes "$target")" || exit 1
+            printf 'requested-target\0%s\0present\0%s\0' "$relative_path" "$size"
+          else
+            printf 'requested-target\0%s\0missing\0' "$relative_path"
+          fi
+        done
+        for target in "${PROTECTED_PATHS[@]}"; do
+          printf 'preserved\0%s\0' "$target"
+        done
+      fi
       if [[ -n "$API_ROOT" ]]; then
         if [[ -e "$GO_CACHE" ]]; then
           size="$(path_size_bytes "$GO_CACHE")" || exit 1
@@ -313,9 +415,66 @@ inventory_token() {
   printf '%s\n' "$digest"
 }
 
+run_dry_run() {
+  local -a args=(--dry-run)
+  local relative_path
+  [[ "$ROOT_DIR_PROVIDED" != true ]] || args+=(--root "$ROOT_DIR")
+  if [[ "$EXPLICIT_MODE" == true ]]; then
+    for relative_path in "${EXPLICIT_TARGET_PATHS[@]}"; do args+=(--target "$relative_path"); done
+    for relative_path in "${PRESERVE_PATHS[@]}"; do args+=(--preserve "$relative_path"); done
+  fi
+  bash "$0" "${args[@]}"
+}
+
 assert_processes_idle() {
-  local processes process name
+  local processes process name pid command args target open_files status
   local -a active=()
+  if [[ "$EXPLICIT_MODE" == true ]]; then
+    [[ ${#TARGETS[@]} -gt 0 ]] || return 0
+    if ! processes="$(ps -ww -axo pid=,comm=,args= 2>/dev/null)"; then
+      fail 'cannot inspect build/test processes; refusing cleanup'
+    fi
+    [[ -n "$processes" ]] || fail 'process inspection returned no data; refusing cleanup'
+    while IFS= read -r process; do
+      read -r pid command args <<< "$process"
+      name="${command##*/}"
+      case "$name" in
+        Xcode|XcodeBuildService|xcodebuild|Simulator*|xctest|testmanagerd|go|*.test|compile|link|asm|vet|cover|cgo|swift|swiftc|swift-frontend|swift-driver|swift-build|swift-test|SourceKitService|XCBBuildService)
+          if [[ "$args" == *"$ROOT_DIR"* ]]; then active+=("$pid:$name"); continue; fi
+          for target in "${TARGETS[@]}"; do
+            if [[ "$args" == *"$target"* ]]; then active+=("$pid:$name"); break; fi
+          done
+          ;;
+      esac
+    done <<< "$processes"
+    if [[ ${#active[@]} -gt 0 ]]; then
+      printf 'Refusing cleanup while these build/test processes reference the workspace: %s\n' "${active[*]}" >&2
+      exit 1
+    fi
+    command -v lsof >/dev/null 2>&1 || fail 'lsof is required to inspect open files in explicit cleanup targets'
+    for target in "${TARGETS[@]}"; do
+      if [[ -d "$target" ]]; then
+        if open_files="$(lsof -n -t +D "$target" 2>&1)"; then
+          [[ -n "$open_files" ]] || fail "lsof returned no process data for cleanup target: $target"
+        else
+          status=$?
+          [[ "$status" -eq 1 && -z "$open_files" ]] || fail "cannot inspect open files in cleanup target: $target"
+          continue
+        fi
+        printf 'Refusing cleanup while processes have files open under %s (PIDs: %s)\n' "$target" "$(printf '%s' "$open_files" | tr '\n' ' ')" >&2
+        exit 1
+      fi
+      if open_files="$(lsof -n -t "$target" 2>&1)"; then
+        [[ -n "$open_files" ]] || fail "lsof returned no process data for cleanup target: $target"
+        printf 'Refusing cleanup while processes have the cleanup target open: %s (PIDs: %s)\n' "$target" "$(printf '%s' "$open_files" | tr '\n' ' ')" >&2
+        exit 1
+      else
+        status=$?
+        [[ "$status" -eq 1 && -z "$open_files" ]] || fail "cannot inspect open cleanup target: $target"
+      fi
+    done
+    return 0
+  fi
   if ! processes="$(ps -axo comm= 2>/dev/null)"; then
     fail 'cannot inspect build/test processes; refusing cleanup'
   fi
@@ -338,43 +497,51 @@ collect_targets
 INITIAL_TOKEN="$(inventory_token)" || INITIAL_TOKEN=""
 IOS_BYTES=0
 GO_BYTES=0
+SCRATCH_BYTES=0
 SIZES_KNOWN=true
 printf 'Cleanup inventory (%s):\n' "$ROOT_DIR"
-printf '  iOS targets:\n'
-IOS_FOUND=false
-for target in "${IOS_TARGETS[@]-}"; do
-  [[ -n "$target" ]] || continue
-  IOS_FOUND=true
-  print_size "$target" ios
-done
-[[ "$IOS_FOUND" == true ]] || printf '%12s  %s\n' '' 'none'
-printf '  Go targets:\n'
-GO_FOUND=false
-for target in "${GO_TARGETS[@]-}"; do
-  [[ -n "$target" ]] || continue
-  GO_FOUND=true
-  print_size "$target" go
-done
-if [[ -n "$API_ROOT" ]]; then
-  if [[ -e "$GO_CACHE" || -L "$GO_CACHE" ]]; then
-    printf '  Go build/test cache (go clean -cache -testcache):\n'
-    print_size "$GO_CACHE" go
-  else
-    printf '  Go build/test cache not present: %s\n' "$GO_CACHE"
+if [[ "$EXPLICIT_MODE" == true ]]; then
+  printf '  Explicit build/test targets:\n'
+  for target in "${SCRATCH_TARGETS[@]-}"; do print_size "$target" scratch; done
+  [[ ${#SCRATCH_TARGETS[@]} -gt 0 ]] || printf '%12s  %s\n' '' 'none'
+  for target in "${PROTECTED_PATHS[@]}"; do printf '  preserved: %s\n' "$target"; done
+else
+  printf '  iOS targets:\n'
+  IOS_FOUND=false
+  for target in "${IOS_TARGETS[@]-}"; do
+    [[ -n "$target" ]] || continue
+    IOS_FOUND=true
+    print_size "$target" ios
+  done
+  [[ "$IOS_FOUND" == true ]] || printf '%12s  %s\n' '' 'none'
+  printf '  Go targets:\n'
+  GO_FOUND=false
+  for target in "${GO_TARGETS[@]-}"; do
+    [[ -n "$target" ]] || continue
+    GO_FOUND=true
+    print_size "$target" go
+  done
+  if [[ -n "$API_ROOT" ]]; then
+    if [[ -e "$GO_CACHE" || -L "$GO_CACHE" ]]; then
+      printf '  Go build/test cache (go clean -cache -testcache):\n'
+      print_size "$GO_CACHE" go
+    else
+      printf '  Go build/test cache not present: %s\n' "$GO_CACHE"
+    fi
+    printf '  preserved Go module cache: %s\n' "$GO_MOD_CACHE"
   fi
-  printf '  preserved Go module cache: %s\n' "$GO_MOD_CACHE"
+  [[ "$GO_FOUND" == true || -n "$API_ROOT" ]] || printf '%12s  %s\n' '' 'none'
 fi
-[[ "$GO_FOUND" == true || -n "$API_ROOT" ]] || printf '%12s  %s\n' '' 'none'
 if [[ "$SIZES_KNOWN" == true ]]; then
-  TOTAL_BYTES=$((IOS_BYTES + GO_BYTES))
-  printf 'Estimated cleanup size (pre-clean disk usage): iOS %s; Go %s; total %s\n' "$(format_bytes "$IOS_BYTES")" "$(format_bytes "$GO_BYTES")" "$(format_bytes "$TOTAL_BYTES")"
+  TOTAL_BYTES=$((IOS_BYTES + GO_BYTES + SCRATCH_BYTES))
+  printf 'Estimated cleanup size (pre-clean disk usage): iOS %s; Go %s; explicit targets %s; total %s\n' "$(format_bytes "$IOS_BYTES")" "$(format_bytes "$GO_BYTES")" "$(format_bytes "$SCRATCH_BYTES")" "$(format_bytes "$TOTAL_BYTES")"
 else
   printf 'Estimated cleanup size unavailable because at least one target size could not be read.\n'
 fi
 CURRENT_TOKEN="$(inventory_token)" || fail 'cannot create an inventory approval token'
 if [[ -n "$INITIAL_TOKEN" && "$INITIAL_TOKEN" != "$CURRENT_TOKEN" ]]; then
   printf 'Inventory changed while preparing the preview. Refreshing the inventory:\n'
-  bash "$0" --root "$ROOT_DIR" --dry-run
+  run_dry_run
   fail 'review the refreshed inventory before approving cleanup'
 fi
 printf 'Approval token: %s\n' "$CURRENT_TOKEN"
@@ -391,14 +558,14 @@ collect_targets
 LATEST_TOKEN="$(inventory_token)" || fail 'cannot refresh the inventory approval token'
 if [[ "$LATEST_TOKEN" != "$APPROVAL_TOKEN" ]]; then
   printf 'Inventory changed during apply preparation; no artifacts were removed. Refreshing the inventory:\n'
-  bash "$0" --root "$ROOT_DIR" --dry-run
+  run_dry_run
   fail 'review the refreshed inventory and approve its token before retrying'
 fi
 assert_processes_idle
 FINAL_TOKEN="$(inventory_token)" || fail 'cannot recheck the inventory approval token'
 if [[ "$FINAL_TOKEN" != "$APPROVAL_TOKEN" ]]; then
   printf 'Inventory changed during apply preparation; no artifacts were removed. Refreshing the inventory:\n'
-  "$0" --root "$ROOT_DIR" --dry-run
+  run_dry_run
   fail 'review the refreshed inventory and approve its token before retrying'
 fi
 
@@ -432,5 +599,5 @@ if [[ ${#TARGETS[@]} -gt 0 ]]; then
   done
 fi
 printf 'verified all listed cleanup targets are gone.\n'
-TOTAL_BYTES=$((IOS_BYTES + GO_BYTES))
-printf 'Cleanup total (pre-clean disk usage): iOS %s; Go %s; combined %s\n' "$(format_bytes "$IOS_BYTES")" "$(format_bytes "$GO_BYTES")" "$(format_bytes "$TOTAL_BYTES")"
+TOTAL_BYTES=$((IOS_BYTES + GO_BYTES + SCRATCH_BYTES))
+printf 'Cleanup total (pre-clean disk usage): iOS %s; Go %s; explicit targets %s; combined %s\n' "$(format_bytes "$IOS_BYTES")" "$(format_bytes "$GO_BYTES")" "$(format_bytes "$SCRATCH_BYTES")" "$(format_bytes "$TOTAL_BYTES")"
