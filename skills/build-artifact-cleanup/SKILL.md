@@ -1,6 +1,6 @@
 ---
 name: build-artifact-cleanup
-description: Inventory and clean FlowCoach build artifacts, or exact build/test paths in another safe workspace. Deletion requires approval of the exact previewed targets.
+description: Inventory and clean MatPace or historical FlowCoach build artifacts, or exact build/test paths in another safe workspace. Deletion requires approval of the exact previewed targets.
 ---
 
 # Build Artifact Cleanup
@@ -17,6 +17,6 @@ The default inventory includes the shared `XcodeBuildMCP/workspaces` and `XCTest
 
 This script does not delete Simulator devices. If a separately authorized cleanup removes devices by name, preview exact names, runtimes, states, and UUIDs from fresh `xcrun simctl list devices --json` output and get approval. After approval, query the JSON again immediately before deletion; resolve the names again, require the approved runtime and UUID to match, and derive the deletion UUIDs from that fresh result. If the inventory changed, stop and request approval for a refreshed list. Delete only devices in the Shutdown state; refuse Booted or any other state. Query the device list again after deletion and verify the approved UUIDs are absent. Never reuse UUIDs copied from an older command output or conversation.
 
-The script retains reusable dependency caches, including the Go module download cache. It scans `*go-build*`, `*gocache*`, and `*go-cache*` under `TMPDIR`, `GOTMPDIR`, and `/private/tmp`. Matching build/test cache paths are deleted even when their names contain a work-item ID; unrelated source files remain outside the cleanup targets.
+The script retains reusable dependency caches, including the Go module download cache. It also retains the default global `$HOME/Library/Caches/go-build` cache unless the user explicitly includes it; only then pass `--include-go-cache` in both preview and apply. Other configured Go build caches remain in the preview. It scans `*go-build*`, `*gocache*`, and `*go-cache*` under `TMPDIR`, `GOTMPDIR`, and `/private/tmp`. Matching build/test cache paths are deleted even when their names contain a work-item ID; unrelated source files remain outside the cleanup targets.
 
 Keep this skill as the single source for this cleanup behavior. Do not add a second copy of its cleanup script or rules to a component repository.

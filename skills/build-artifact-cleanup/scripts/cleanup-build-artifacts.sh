@@ -5,22 +5,24 @@ ROOT_DIR="$PWD"
 ROOT_DIR_PROVIDED=false
 APPLY=false
 APPROVAL_TOKEN=""
+INCLUDE_GLOBAL_GO_CACHE=false
 EXPLICIT_MODE=false
 EXPLICIT_TARGET_PATHS=()
 PRESERVE_PATHS=()
 
 usage() {
   cat <<'USAGE'
-Inventory or clean generated FlowCoach iOS and Go API build/test artifacts,
+Inventory or clean generated MatPace or FlowCoach iOS and Go API build/test artifacts,
 or explicitly selected build/test targets in a safe workspace.
 
 Usage:
-  cleanup-build-artifacts.sh [--root <FlowCoach-workspace-or-repo>] [--apply --approval-token <sha256>]
+  cleanup-build-artifacts.sh [--root <workspace-or-repo>] [--include-go-cache] [--apply --approval-token <sha256>]
   cleanup-build-artifacts.sh --root <workspace> --target <relative-path>... [--preserve <relative-path>...] [--apply --approval-token <sha256>]
 
 The default is a dry run. --apply requires the token from the exact previewed
-inventory and checks that build/test processes are idle. Go module downloads
-and reusable Xcode package/module/compilation caches are retained.
+inventory and checks that build/test processes are idle. The default global Go build
+cache is retained unless explicitly included with --include-go-cache on both preview
+and apply. Go module downloads and reusable Xcode package/module caches are retained.
 Explicit targets are exact relative paths (no globbing) under a project subdirectory
 of the user home or temporary directory; --preserve protects paths within it.
 USAGE
@@ -48,6 +50,10 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || fail '--preserve requires a relative path'
       PRESERVE_PATHS+=("$2")
       shift 2
+      ;;
+    --include-go-cache)
+      INCLUDE_GLOBAL_GO_CACHE=true
+      shift
       ;;
     --apply)
       APPLY=true
@@ -86,19 +92,25 @@ IOS_ROOT=""
 API_ROOT=""
 if [[ "$EXPLICIT_MODE" != true ]]; then
   ROOT_NAME="${ROOT_DIR##*/}"
-  if [[ -d "$ROOT_DIR/flowcoach-ios" ]]; then
-    [[ ! -L "$ROOT_DIR/flowcoach-ios" ]] || fail "refusing symlinked FlowCoach iOS repository: $ROOT_DIR/flowcoach-ios"
-    IOS_ROOT="$ROOT_DIR/flowcoach-ios"
-  elif [[ "$ROOT_NAME" == "flowcoach-ios" && ( -d "$ROOT_DIR/.derived_data" || -f "$ROOT_DIR/Podfile" ) ]]; then
-    IOS_ROOT="$ROOT_DIR"
-  fi
-  if [[ -d "$ROOT_DIR/flowcoach-api" && -f "$ROOT_DIR/flowcoach-api/go.mod" ]]; then
-    [[ ! -L "$ROOT_DIR/flowcoach-api" ]] || fail "refusing symlinked FlowCoach API repository: $ROOT_DIR/flowcoach-api"
-    API_ROOT="$ROOT_DIR/flowcoach-api"
-  elif [[ "$ROOT_NAME" == "flowcoach-api" && -f "$ROOT_DIR/go.mod" ]]; then
-    API_ROOT="$ROOT_DIR"
-  fi
-  [[ -n "$IOS_ROOT" || -n "$API_ROOT" ]] || fail 'expected a FlowCoach workspace, iOS repository, or Go API repository'
+  for project_name in matpace-ios flowcoach-ios; do
+    if [[ -d "$ROOT_DIR/$project_name" ]]; then
+      [[ ! -L "$ROOT_DIR/$project_name" ]] || fail "refusing symlinked iOS repository: $ROOT_DIR/$project_name"
+      [[ -z "$IOS_ROOT" ]] || fail 'multiple iOS repositories found; choose one explicitly'
+      IOS_ROOT="$ROOT_DIR/$project_name"
+    elif [[ "$ROOT_NAME" == "$project_name" && ( -d "$ROOT_DIR/.derived_data" || -f "$ROOT_DIR/Podfile" || -d "$ROOT_DIR/MatPace.xcodeproj" ) ]]; then
+      IOS_ROOT="$ROOT_DIR"
+    fi
+  done
+  for project_name in matpace-api flowcoach-api; do
+    if [[ -d "$ROOT_DIR/$project_name" && -f "$ROOT_DIR/$project_name/go.mod" ]]; then
+      [[ ! -L "$ROOT_DIR/$project_name" ]] || fail "refusing symlinked API repository: $ROOT_DIR/$project_name"
+      [[ -z "$API_ROOT" ]] || fail 'multiple API repositories found; choose one explicitly'
+      API_ROOT="$ROOT_DIR/$project_name"
+    elif [[ "$ROOT_NAME" == "$project_name" && -f "$ROOT_DIR/go.mod" ]]; then
+      API_ROOT="$ROOT_DIR"
+    fi
+  done
+  [[ -n "$IOS_ROOT" || -n "$API_ROOT" ]] || fail 'expected a MatPace or FlowCoach workspace, iOS repository, or Go API repository'
 fi
 
 TARGETS=()
@@ -184,7 +196,8 @@ if [[ "$EXPLICIT_MODE" == true ]]; then
   for relative_path in "${EXPLICIT_TARGET_PATHS[@]}"; do
     validate_relative_path "$relative_path" 'target'
   done
-  for relative_path in "${PRESERVE_PATHS[@]}"; do
+  for relative_path in "${PRESERVE_PATHS[@]-}"; do
+    [[ -n "$relative_path" ]] || continue
     validate_relative_path "$relative_path" 'preserved'
     candidate="$ROOT_DIR/$relative_path"
     [[ -e "$candidate" || -L "$candidate" ]] || fail "preserved path not found: $candidate"
@@ -225,7 +238,8 @@ add_target() {
   path_is_within "$real_parent" "$boundary" || fail "cleanup target resolves outside its allowed directory: $candidate"
   if [[ "$EXPLICIT_MODE" == true ]]; then
     candidate="$real_parent/${candidate##*/}"
-    for protected_path in "${PROTECTED_PATHS[@]}"; do
+    for protected_path in "${PROTECTED_PATHS[@]-}"; do
+      [[ -n "$protected_path" ]] || continue
       if [[ "$candidate" == "$protected_path" ]] || path_is_within "$candidate" "$protected_path" || path_is_within "$protected_path" "$candidate"; then
         fail "cleanup target overlaps preserved path: $candidate ($protected_path)"
       fi
@@ -314,12 +328,14 @@ collect_targets() {
 
   if [[ -n "$API_ROOT" ]]; then
     command -v go >/dev/null 2>&1 || fail 'Go is required to inspect and clean the API build/test cache'
-    add_target "$API_ROOT/bin/flowcoach-api" go "$API_ROOT"
+    add_target "$API_ROOT/bin/${API_ROOT##*/}" go "$API_ROOT"
     GO_CACHE_RAW="$(cd "$API_ROOT" && go env GOCACHE)"
     GO_MOD_CACHE_RAW="$(cd "$API_ROOT" && go env GOMODCACHE)"
     [[ ! -L "$GO_CACHE_RAW" ]] || fail "refusing symlinked Go build cache: $GO_CACHE_RAW"
     GO_CACHE="$(canonical_config_dir "$GO_CACHE_RAW" 'Go build cache')"
     GO_MOD_CACHE="$(canonical_config_dir "$GO_MOD_CACHE_RAW" 'Go module cache')"
+    GO_CACHE_CLEAN=true
+    if [[ "$GO_CACHE" == "$USER_HOME/Library/Caches/go-build" && "$INCLUDE_GLOBAL_GO_CACHE" != true ]]; then GO_CACHE_CLEAN=false; fi
     [[ "$GO_CACHE" != '/' ]] || fail "refusing unsafe Go build cache path: $GO_CACHE"
     for broad_path in /Users /private /private/var /var /System /System/Volumes /Applications /Volumes "$USER_HOME" "$USER_HOME/Library" "$USER_HOME/Library/Caches" "$USER_HOME/Library/Developer" /private/tmp /private/var/folders; do
       [[ "$GO_CACHE" != "$broad_path" ]] || fail "refusing broad Go build cache path: $GO_CACHE"
@@ -396,12 +412,16 @@ inventory_token() {
             printf 'requested-target\0%s\0missing\0' "$relative_path"
           fi
         done
-        for target in "${PROTECTED_PATHS[@]}"; do
+        for target in "${PROTECTED_PATHS[@]-}"; do
+          [[ -n "$target" ]] || continue
           printf 'preserved\0%s\0' "$target"
         done
       fi
       if [[ -n "$API_ROOT" ]]; then
-        if [[ -e "$GO_CACHE" ]]; then
+        printf 'go-cache-clean\0%s\0' "$GO_CACHE_CLEAN"
+        if [[ "$GO_CACHE_CLEAN" != true ]]; then
+          printf 'go-cache\0%s\0preserved\0' "$GO_CACHE"
+        elif [[ -e "$GO_CACHE" ]]; then
           size="$(path_size_bytes "$GO_CACHE")" || exit 1
           printf 'go-cache\0%s\0present\0%s\0' "$GO_CACHE" "$size"
         else
@@ -417,11 +437,12 @@ inventory_token() {
 
 run_dry_run() {
   local -a args=(--dry-run)
+  [[ "$INCLUDE_GLOBAL_GO_CACHE" != true ]] || args+=(--include-go-cache)
   local relative_path
   [[ "$ROOT_DIR_PROVIDED" != true ]] || args+=(--root "$ROOT_DIR")
   if [[ "$EXPLICIT_MODE" == true ]]; then
     for relative_path in "${EXPLICIT_TARGET_PATHS[@]}"; do args+=(--target "$relative_path"); done
-    for relative_path in "${PRESERVE_PATHS[@]}"; do args+=(--preserve "$relative_path"); done
+    for relative_path in "${PRESERVE_PATHS[@]-}"; do [[ -n "$relative_path" ]] || continue; args+=(--preserve "$relative_path"); done
   fi
   bash "$0" "${args[@]}"
 }
@@ -502,9 +523,9 @@ SIZES_KNOWN=true
 printf 'Cleanup inventory (%s):\n' "$ROOT_DIR"
 if [[ "$EXPLICIT_MODE" == true ]]; then
   printf '  Explicit build/test targets:\n'
-  for target in "${SCRATCH_TARGETS[@]-}"; do print_size "$target" scratch; done
+  for target in "${SCRATCH_TARGETS[@]-}"; do [[ -n "$target" ]] || continue; print_size "$target" scratch; done
   [[ ${#SCRATCH_TARGETS[@]} -gt 0 ]] || printf '%12s  %s\n' '' 'none'
-  for target in "${PROTECTED_PATHS[@]}"; do printf '  preserved: %s\n' "$target"; done
+  for target in "${PROTECTED_PATHS[@]-}"; do [[ -n "$target" ]] || continue; printf '  preserved: %s\n' "$target"; done
 else
   printf '  iOS targets:\n'
   IOS_FOUND=false
@@ -522,7 +543,9 @@ else
     print_size "$target" go
   done
   if [[ -n "$API_ROOT" ]]; then
-    if [[ -e "$GO_CACHE" || -L "$GO_CACHE" ]]; then
+    if [[ "$GO_CACHE_CLEAN" != true ]]; then
+      printf '  preserved global Go build/test cache: %s\n' "$GO_CACHE"
+    elif [[ -e "$GO_CACHE" || -L "$GO_CACHE" ]]; then
       printf '  Go build/test cache (go clean -cache -testcache):\n'
       print_size "$GO_CACHE" go
     else
@@ -576,7 +599,7 @@ if [[ ${#TARGETS[@]} -gt 0 ]]; then
   done
 fi
 
-if [[ -n "$API_ROOT" && ( -e "$GO_CACHE" || -L "$GO_CACHE" ) ]]; then
+if [[ -n "$API_ROOT" && "$GO_CACHE_CLEAN" == true && ( -e "$GO_CACHE" || -L "$GO_CACHE" ) ]]; then
   (cd "$API_ROOT" && go clean -cache -testcache)
   if [[ -d "$GO_CACHE" ]]; then
     shopt -s nullglob dotglob
