@@ -44,7 +44,70 @@ esac
         result = self.run_cleanup('--target', 'matpace-api/bin/matpace-api')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(str(self.target), result.stdout)
-        return re.search(r'Approval token: ([a-f0-9]{64})', result.stdout).group(1)
+        return self.approval_token(result)
+
+    @staticmethod
+    def approval_token(result):
+        return re.search(r'^Approval token: (\S+)$', result.stdout, re.MULTILINE).group(1)
+
+    def test_mixed_targets_refresh_only_changed_path(self):
+        scratch = self.root / 'scratch result'
+        scratch.mkdir()
+        (scratch / 'log').write_bytes(b'old')
+        changed = self.workspace / 'build output'
+        changed.mkdir()
+        (changed / 'log').write_bytes(b'old')
+        unrelated = self.root / 'unrelated'
+        unrelated.touch()
+        args = ('--target', 'build output', '--temp-target', str(scratch))
+        preview = self.run_cleanup(*args)
+        self.assertEqual(preview.returncode, 0, preview.stderr)
+        self.assertIn(str(changed), preview.stdout)
+        self.assertIn(str(scratch), preview.stdout)
+        token = self.approval_token(preview)
+        (changed / 'log').write_bytes(b'new')
+
+        result = self.run_cleanup(*args, '--apply', '--approval-token', token)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(scratch.exists())
+        self.assertTrue(changed.exists())
+        self.assertTrue(unrelated.exists())
+        refresh = result.stdout.split('Cleanup inventory (', 1)[1]
+        self.assertIn(str(changed), refresh)
+        self.assertNotIn(str(scratch), refresh)
+        retry = self.run_cleanup('--target', 'build output', '--apply',
+                                 '--approval-token', self.approval_token(result))
+        self.assertEqual(retry.returncode, 0, retry.stderr)
+        self.assertFalse(changed.exists())
+
+    def test_temp_target_rejects_roots_traversal_and_symlink_parents(self):
+        link = self.root / 'redirect'
+        link.symlink_to(self.target.parent, target_is_directory=True)
+        for target in ('/private/tmp', '/Users', str(self.root / '..' / 'elsewhere'), str(link / self.target.name)):
+            with self.subTest(target=target):
+                result = self.run_cleanup('--temp-target', target)
+                self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.target.exists())
+
+    def test_same_size_replacement_is_held(self):
+        token = self.preview_token()
+        original = self.target.with_name('original')
+        self.target.rename(original)
+        self.target.write_bytes(b'test')
+        result = self.run_cleanup('--target', 'matpace-api/bin/matpace-api', '--apply', '--approval-token', token)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.target.exists())
+        self.assertTrue(original.exists())
+
+    def test_original_approval_cannot_add_a_target(self):
+        token = self.preview_token()
+        scratch = self.root / 'unapproved'
+        scratch.touch()
+        result = self.run_cleanup('--target', 'matpace-api/bin/matpace-api',
+                                  '--temp-target', str(scratch), '--apply', '--approval-token', token)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(scratch.exists())
+        self.assertTrue(self.target.exists())
 
     def test_matpace_default_preview_preserves_global_go_cache(self):
         result = self.run_cleanup()

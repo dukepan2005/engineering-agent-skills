@@ -8,6 +8,7 @@ APPROVAL_TOKEN=""
 INCLUDE_GLOBAL_GO_CACHE=false
 EXPLICIT_MODE=false
 EXPLICIT_TARGET_PATHS=()
+TEMP_TARGET_PATHS=()
 PRESERVE_PATHS=()
 
 usage() {
@@ -17,14 +18,17 @@ or explicitly selected build/test targets in a safe workspace.
 
 Usage:
   cleanup-build-artifacts.sh [--root <workspace-or-repo>] [--include-go-cache] [--apply --approval-token <sha256>]
-  cleanup-build-artifacts.sh --root <workspace> --target <relative-path>... [--preserve <relative-path>...] [--apply --approval-token <sha256>]
+  cleanup-build-artifacts.sh --root <workspace> [--target <relative-path>]... [--temp-target <absolute-path>]... [--preserve <relative-path>]... [--apply --approval-token <token>]
 
 The default is a dry run. --apply requires the token from the exact previewed
 inventory and checks that build/test processes are idle. The default global Go build
 cache is retained unless explicitly included with --include-go-cache on both preview
 and apply. Go module downloads and reusable Xcode package/module caches are retained.
 Explicit targets are exact relative paths (no globbing) under a project subdirectory
-of the user home or temporary directory; --preserve protects paths within it.
+of the user home or temporary directory. --temp-target selects exact paths under
+/private/tmp or the active macOS temporary directory. Both flags can be combined.
+--preserve protects workspace paths. In explicit mode, a changed target gets a
+fresh preview while the approved targets that still match are removed.
 USAGE
 }
 
@@ -44,6 +48,11 @@ while [[ $# -gt 0 ]]; do
     --target)
       [[ $# -ge 2 ]] || fail '--target requires a relative path'
       EXPLICIT_TARGET_PATHS+=("$2")
+      shift 2
+      ;;
+    --temp-target)
+      [[ $# -ge 2 ]] || fail '--temp-target requires an absolute path'
+      TEMP_TARGET_PATHS+=("$2")
       shift 2
       ;;
     --preserve)
@@ -78,11 +87,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ${#EXPLICIT_TARGET_PATHS[@]} -gt 0 || ${#PRESERVE_PATHS[@]} -gt 0 ]]; then
+if [[ ${#EXPLICIT_TARGET_PATHS[@]} -gt 0 || ${#TEMP_TARGET_PATHS[@]} -gt 0 || ${#PRESERVE_PATHS[@]} -gt 0 ]]; then
   EXPLICIT_MODE=true
 fi
-[[ "$EXPLICIT_MODE" != true || "$ROOT_DIR_PROVIDED" == true ]] || fail '--target/--preserve require --root'
-[[ "$EXPLICIT_MODE" != true || ${#EXPLICIT_TARGET_PATHS[@]} -gt 0 ]] || fail '--preserve requires at least one --target'
+[[ "$EXPLICIT_MODE" != true || "$ROOT_DIR_PROVIDED" == true ]] || fail 'explicit cleanup requires --root'
+[[ "$EXPLICIT_MODE" != true || ${#EXPLICIT_TARGET_PATHS[@]} -gt 0 || ${#TEMP_TARGET_PATHS[@]} -gt 0 ]] || fail '--preserve requires at least one target'
 [[ "$APPLY" == true || -z "$APPROVAL_TOKEN" ]] || fail '--approval-token requires --apply'
 [[ -d "$ROOT_DIR" ]] || fail "workspace or repository not found: $ROOT_DIR"
 [[ "$EXPLICIT_MODE" != true || ! -L "$ROOT_DIR" ]] || fail "refusing symlinked explicit workspace: $ROOT_DIR"
@@ -196,6 +205,18 @@ if [[ "$EXPLICIT_MODE" == true ]]; then
   for relative_path in "${EXPLICIT_TARGET_PATHS[@]}"; do
     validate_relative_path "$relative_path" 'target'
   done
+  for i in "${!TEMP_TARGET_PATHS[@]}"; do
+    candidate="${TEMP_TARGET_PATHS[$i]}"
+    case "$candidate" in /tmp/*|/var/folders/*) candidate="/private$candidate" ;; esac
+    [[ "$candidate" == /* ]] || fail "--temp-target requires an absolute path: $candidate"
+    validate_relative_path "${candidate#/}" 'temporary target'
+    if [[ "$candidate" != /private/tmp/* ]] && ! [[ "$TEMP_ROOT" =~ ^/private/var/folders/[^/]+/[^/]+/T(/.*)?$ && "$candidate" == "$TEMP_ROOT/"* ]]; then
+      fail "temporary target outside allowed directories: $candidate"
+    fi
+    path_is_within "$TEMP_ROOT" "$candidate" && fail "temporary target contains the active temporary directory: $candidate"
+    path_is_within "$ROOT_DIR" "$candidate" && fail "temporary target contains the workspace: $candidate"
+    TEMP_TARGET_PATHS[$i]="$candidate"
+  done
   for relative_path in "${PRESERVE_PATHS[@]-}"; do
     [[ -n "$relative_path" ]] || continue
     validate_relative_path "$relative_path" 'preserved'
@@ -231,6 +252,13 @@ add_target() {
   local category="$2"
   local boundary="$3"
   local existing parent real_parent protected_path
+  if [[ "$EXPLICIT_MODE" == true ]]; then
+    parent="${candidate%/*}"
+    while [[ "$parent" != "$boundary" ]]; do
+      [[ ! -L "$parent" ]] || fail "refusing symlinked cleanup parent: $parent"
+      parent="${parent%/*}"
+    done
+  fi
   [[ -e "$candidate" || -L "$candidate" ]] || return 0
   [[ ! -L "$candidate" ]] || fail "refusing symlinked cleanup target: $candidate"
   parent="${candidate%/*}"
@@ -255,7 +283,10 @@ add_target() {
   fi
   if [[ ${#TARGETS[@]} -gt 0 ]]; then
     for existing in "${TARGETS[@]}"; do
-      [[ "$existing" == "$candidate" ]] && return 0
+      if [[ "$existing" == "$candidate" ]]; then
+        [[ "$EXPLICIT_MODE" != true ]] || fail "duplicate explicit cleanup target: $candidate"
+        return 0
+      fi
       if [[ "$EXPLICIT_MODE" == true ]] && { path_is_within "$candidate" "$existing" || path_is_within "$existing" "$candidate"; }; then
         fail "overlapping explicit cleanup targets: $existing and $candidate"
       fi
@@ -300,6 +331,15 @@ collect_targets() {
   if [[ "$EXPLICIT_MODE" == true ]]; then
     for relative_path in "${EXPLICIT_TARGET_PATHS[@]}"; do
       add_target "$ROOT_DIR/$relative_path" scratch "$ROOT_DIR"
+    done
+    for candidate in "${TEMP_TARGET_PATHS[@]-}"; do
+      [[ -n "$candidate" ]] || continue
+      if [[ -e "$candidate" && ! -O "$candidate" ]]; then
+        fail "temporary target is not owned by the current user: $candidate"
+      fi
+      boundary="$TEMP_ROOT"
+      [[ "$candidate" != /private/tmp/* ]] || boundary=/private/tmp
+      add_target "$candidate" scratch "$boundary"
     done
     return 0
   fi
@@ -387,7 +427,7 @@ print_size() {
 }
 
 inventory_token() {
-  local target size digest relative_path
+  local target size digest
   command -v shasum >/dev/null 2>&1 || return 1
   digest="$(
     {
@@ -401,22 +441,6 @@ inventory_token() {
         size="$(path_size_bytes "$target")" || exit 1
         printf 'go\0%s\0%s\0' "$target" "$size"
       done
-      if [[ "$EXPLICIT_MODE" == true ]]; then
-        printf 'explicit-root\0%s\0' "$ROOT_DIR"
-        for relative_path in "${EXPLICIT_TARGET_PATHS[@]}"; do
-          target="$ROOT_DIR/$relative_path"
-          if [[ -e "$target" || -L "$target" ]]; then
-            size="$(path_size_bytes "$target")" || exit 1
-            printf 'requested-target\0%s\0present\0%s\0' "$relative_path" "$size"
-          else
-            printf 'requested-target\0%s\0missing\0' "$relative_path"
-          fi
-        done
-        for target in "${PROTECTED_PATHS[@]-}"; do
-          [[ -n "$target" ]] || continue
-          printf 'preserved\0%s\0' "$target"
-        done
-      fi
       if [[ -n "$API_ROOT" ]]; then
         printf 'go-cache-clean\0%s\0' "$GO_CACHE_CLEAN"
         if [[ "$GO_CACHE_CLEAN" != true ]]; then
@@ -438,12 +462,7 @@ inventory_token() {
 run_dry_run() {
   local -a args=(--dry-run)
   [[ "$INCLUDE_GLOBAL_GO_CACHE" != true ]] || args+=(--include-go-cache)
-  local relative_path
   [[ "$ROOT_DIR_PROVIDED" != true ]] || args+=(--root "$ROOT_DIR")
-  if [[ "$EXPLICIT_MODE" == true ]]; then
-    for relative_path in "${EXPLICIT_TARGET_PATHS[@]}"; do args+=(--target "$relative_path"); done
-    for relative_path in "${PRESERVE_PATHS[@]-}"; do [[ -n "$relative_path" ]] || continue; args+=(--preserve "$relative_path"); done
-  fi
   bash "$0" "${args[@]}"
 }
 
@@ -460,7 +479,7 @@ assert_processes_idle() {
       read -r pid command args <<< "$process"
       name="${command##*/}"
       case "$name" in
-        Xcode|XcodeBuildService|xcodebuild|Simulator*|xctest|testmanagerd|go|*.test|compile|link|asm|vet|cover|cgo|swift|swiftc|swift-frontend|swift-driver|swift-build|swift-test|SourceKitService|XCBBuildService)
+        Xcode|XcodeBuildService|xcodebuild|Simulator*|xctest|xcresulttool|testmanagerd|go|*.test|compile|link|asm|vet|cover|cgo|swift|swiftc|swift-frontend|swift-driver|swift-build|swift-test|SourceKitService|XCBBuildService)
           if [[ "$args" == *"$ROOT_DIR"* ]]; then active+=("$pid:$name"); continue; fi
           for target in "${TARGETS[@]}"; do
             if [[ "$args" == *"$target"* ]]; then active+=("$pid:$name"); break; fi
@@ -514,6 +533,135 @@ assert_processes_idle() {
   fi
 }
 
+# Explicit approvals bind each path independently so a changed entry can be held back.
+explicit_record() {
+  local target="$1" parent before after size digest
+  if [[ ! -e "$target" && ! -L "$target" ]]; then
+    printf 'missing -\n'
+    return
+  fi
+  [[ ! -L "$target" ]] || return 1
+  parent="${target%/*}"
+  [[ "$(cd "$parent" && pwd -P)" == "$parent" ]] || return 1
+  before="$(stat -f '%d:%i:%p:%u:%z:%.9Fm:%.9Fc' "$target")" || return 1
+  size="$(path_size_bytes "$target")" || return 1
+  digest="$(
+    {
+      printf '%s\0%s\0%s\0' "$target" "$before" "$size"
+      find -s "$target" -exec stat -f '%d:%i:%p:%u:%z:%.9Fm:%.9Fc:%N' {} +
+    } | shasum -a 256 | awk '{print $1}'
+  )" || return 1
+  after="$(stat -f '%d:%i:%p:%u:%z:%.9Fm:%.9Fc' "$target")" || return 1
+  [[ "$before" == "$after" ]] || return 1
+  printf '%s %s\n' "$digest" "$size"
+}
+
+explicit_cleanup() {
+  local -a paths=() flags=() approved=() selected=() selected_indexes=() refresh=()
+  local path item i record digest size scope token total=0 removed=0
+  for item in "${EXPLICIT_TARGET_PATHS[@]-}"; do
+    [[ -n "$item" ]] || continue
+    paths+=("$ROOT_DIR/$item")
+    flags+=(--target)
+  done
+  for item in "${TEMP_TARGET_PATHS[@]-}"; do
+    [[ -n "$item" ]] || continue
+    paths+=("$item")
+    flags+=(--temp-target)
+  done
+  scope="$(
+    {
+      printf 'explicit-v1\0%s\0' "$ROOT_DIR"
+      for i in "${!paths[@]}"; do printf '%s\0%s\0' "${flags[$i]}" "${paths[$i]}"; done
+      printf 'preserved\0%s\0' "${PROTECTED_PATHS[@]-}"
+    } | shasum -a 256 | awk '{print $1}'
+  )" || fail 'cannot create the explicit inventory token'
+  collect_targets
+  if [[ "$APPLY" != true ]]; then
+    printf 'Cleanup inventory (%s):\n  Explicit build/test targets:\n' "$ROOT_DIR"
+    token="$scope"
+    for path in "${paths[@]}"; do
+      record="$(explicit_record "$path")" || fail "cannot inspect cleanup target: $path"
+      read -r digest size <<< "$record"
+      token="$token.$digest"
+      if [[ "$digest" == missing ]]; then
+        printf '  missing: %s\n' "$path"
+      else
+        printf '%12s  %s\n' "$(format_bytes "$size")" "$path"
+        total=$((total + size))
+      fi
+    done
+    [[ ${#TARGETS[@]} -gt 0 ]] || printf '  none\n'
+    for path in "${PROTECTED_PATHS[@]-}"; do
+      [[ -n "$path" ]] || continue
+      printf '  preserved: %s\n' "$path"
+    done
+    printf 'Estimated cleanup size: %s\n' "$(format_bytes "$total")"
+    printf 'Approval token: %s\n' "$token"
+    printf 'Dry run only. Approve this exact inventory, then pass its token with --apply.\n'
+    return 0
+  fi
+
+  [[ "$APPROVAL_TOKEN" =~ ^[a-f0-9]{64}(\.([a-f0-9]{64}|missing))+$ ]] || fail '--apply requires the explicit token from the dry run'
+  IFS=. read -r -a approved <<< "$APPROVAL_TOKEN"
+  [[ "${approved[0]}" == "$scope" && ${#approved[@]} -eq $((${#paths[@]} + 1)) ]] || fail 'cleanup paths differ from the approved preview'
+  for i in "${!paths[@]}"; do
+    path="${paths[$i]}"
+    record="$(explicit_record "$path")" || fail "cannot inspect cleanup target: $path"
+    read -r digest size <<< "$record"
+    if [[ "$digest" == missing ]]; then
+      printf 'already absent %s\n' "$path"
+    elif [[ "$digest" == "${approved[$((i + 1))]}" ]]; then
+      selected+=("$path")
+      selected_indexes+=("$i")
+    else
+      refresh+=("$i")
+    fi
+  done
+
+  if [[ ${#selected[@]} -gt 0 ]]; then
+    TARGETS=("${selected[@]}")
+    assert_processes_idle
+    collect_targets
+    for i in "${selected_indexes[@]}"; do
+      path="${paths[$i]}"
+      record="$(explicit_record "$path")" || fail "cannot recheck cleanup target: $path"
+      read -r digest size <<< "$record"
+      if [[ "$digest" == missing ]]; then
+        printf 'already absent %s\n' "$path"
+      elif [[ "$digest" != "${approved[$((i + 1))]}" ]]; then
+        refresh+=("$i")
+      else
+        rm -rf -- "$path"
+        [[ ! -e "$path" && ! -L "$path" ]] || fail "cleanup target remains: $path"
+        removed=$((removed + 1))
+        total=$((total + size))
+        printf 'removed %s\n' "$path"
+      fi
+    done
+  fi
+  printf 'Verified removal of %s explicit targets (%s before cleanup).\n' "$removed" "$(format_bytes "$total")"
+  if [[ ${#refresh[@]} -gt 0 ]]; then
+    local -a args=(--root "$ROOT_DIR")
+    for i in "${refresh[@]}"; do
+      item="${paths[$i]}"
+      if [[ "${flags[$i]}" == --target ]]; then item="${item#"$ROOT_DIR/"}"; fi
+      args+=("${flags[$i]}" "$item")
+    done
+    for item in "${PRESERVE_PATHS[@]-}"; do [[ -z "$item" ]] || args+=(--preserve "$item"); done
+    printf 'Changed targets held for fresh approval. Retry only these targets after approval:\n  bash %q' "$0"
+    printf ' %q' "${args[@]}"
+    printf ' --apply --approval-token %q\n' '<new-token>'
+    bash "$0" "${args[@]}"
+    return 1
+  fi
+}
+
+if [[ "$EXPLICIT_MODE" == true ]]; then
+  explicit_cleanup
+  exit $?
+fi
+
 collect_targets
 INITIAL_TOKEN="$(inventory_token)" || INITIAL_TOKEN=""
 IOS_BYTES=0
@@ -521,40 +669,33 @@ GO_BYTES=0
 SCRATCH_BYTES=0
 SIZES_KNOWN=true
 printf 'Cleanup inventory (%s):\n' "$ROOT_DIR"
-if [[ "$EXPLICIT_MODE" == true ]]; then
-  printf '  Explicit build/test targets:\n'
-  for target in "${SCRATCH_TARGETS[@]-}"; do [[ -n "$target" ]] || continue; print_size "$target" scratch; done
-  [[ ${#SCRATCH_TARGETS[@]} -gt 0 ]] || printf '%12s  %s\n' '' 'none'
-  for target in "${PROTECTED_PATHS[@]-}"; do [[ -n "$target" ]] || continue; printf '  preserved: %s\n' "$target"; done
-else
-  printf '  iOS targets:\n'
-  IOS_FOUND=false
-  for target in "${IOS_TARGETS[@]-}"; do
-    [[ -n "$target" ]] || continue
-    IOS_FOUND=true
-    print_size "$target" ios
-  done
-  [[ "$IOS_FOUND" == true ]] || printf '%12s  %s\n' '' 'none'
-  printf '  Go targets:\n'
-  GO_FOUND=false
-  for target in "${GO_TARGETS[@]-}"; do
-    [[ -n "$target" ]] || continue
-    GO_FOUND=true
-    print_size "$target" go
-  done
-  if [[ -n "$API_ROOT" ]]; then
-    if [[ "$GO_CACHE_CLEAN" != true ]]; then
-      printf '  preserved global Go build/test cache: %s\n' "$GO_CACHE"
-    elif [[ -e "$GO_CACHE" || -L "$GO_CACHE" ]]; then
-      printf '  Go build/test cache (go clean -cache -testcache):\n'
-      print_size "$GO_CACHE" go
-    else
-      printf '  Go build/test cache not present: %s\n' "$GO_CACHE"
-    fi
-    printf '  preserved Go module cache: %s\n' "$GO_MOD_CACHE"
+printf '  iOS targets:\n'
+IOS_FOUND=false
+for target in "${IOS_TARGETS[@]-}"; do
+  [[ -n "$target" ]] || continue
+  IOS_FOUND=true
+  print_size "$target" ios
+done
+[[ "$IOS_FOUND" == true ]] || printf '%12s  %s\n' '' 'none'
+printf '  Go targets:\n'
+GO_FOUND=false
+for target in "${GO_TARGETS[@]-}"; do
+  [[ -n "$target" ]] || continue
+  GO_FOUND=true
+  print_size "$target" go
+done
+if [[ -n "$API_ROOT" ]]; then
+  if [[ "$GO_CACHE_CLEAN" != true ]]; then
+    printf '  preserved global Go build/test cache: %s\n' "$GO_CACHE"
+  elif [[ -e "$GO_CACHE" || -L "$GO_CACHE" ]]; then
+    printf '  Go build/test cache (go clean -cache -testcache):\n'
+    print_size "$GO_CACHE" go
+  else
+    printf '  Go build/test cache not present: %s\n' "$GO_CACHE"
   fi
-  [[ "$GO_FOUND" == true || -n "$API_ROOT" ]] || printf '%12s  %s\n' '' 'none'
+  printf '  preserved Go module cache: %s\n' "$GO_MOD_CACHE"
 fi
+[[ "$GO_FOUND" == true || -n "$API_ROOT" ]] || printf '%12s  %s\n' '' 'none'
 if [[ "$SIZES_KNOWN" == true ]]; then
   TOTAL_BYTES=$((IOS_BYTES + GO_BYTES + SCRATCH_BYTES))
   printf 'Estimated cleanup size (pre-clean disk usage): iOS %s; Go %s; explicit targets %s; total %s\n' "$(format_bytes "$IOS_BYTES")" "$(format_bytes "$GO_BYTES")" "$(format_bytes "$SCRATCH_BYTES")" "$(format_bytes "$TOTAL_BYTES")"
