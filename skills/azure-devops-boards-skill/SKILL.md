@@ -15,8 +15,8 @@ agent reads.
 
 When the current prompt does **not** assign the semantic `task-boards-ops`
 role, your first action on an Azure Boards request is to spawn one isolated
-child and assign that role. On Codex/ChatGPT, prefer GPT-6 Luna with
-`reasoning_effort=high`; if it is unavailable, use GPT-6 Sol with
+child and assign that role. On Codex/ChatGPT, prefer `gpt-6.1-terra` with
+`reasoning_effort=medium`; if it is unavailable, use GPT-6 Sol with
 `reasoning_effort=medium`. Do not treat a specific model ID as a universal
 requirement or infer that spawning is unavailable solely because one ID cannot
 be selected. On Claude Code, use
