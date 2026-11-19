@@ -202,7 +202,8 @@ if [[ "$EXPLICIT_MODE" == true ]]; then
   for broad_path in /Users /private /private/var /private/var/folders /private/tmp /System /System/Volumes /Applications /Volumes "$USER_HOME" "$USER_HOME/Library" "$USER_HOME/Library/Caches" "$USER_HOME/Library/Developer" "$TEMP_ROOT"; do
     [[ "$ROOT_DIR" != "$broad_path" ]] || fail "refusing broad explicit workspace: $ROOT_DIR"
   done
-  for relative_path in "${EXPLICIT_TARGET_PATHS[@]}"; do
+  for relative_path in "${EXPLICIT_TARGET_PATHS[@]-}"; do
+    [[ -n "$relative_path" ]] || continue
     validate_relative_path "$relative_path" 'target'
   done
   for i in "${!TEMP_TARGET_PATHS[@]}"; do
@@ -329,7 +330,8 @@ collect_targets() {
   GO_TMP_DIR=""
 
   if [[ "$EXPLICIT_MODE" == true ]]; then
-    for relative_path in "${EXPLICIT_TARGET_PATHS[@]}"; do
+    for relative_path in "${EXPLICIT_TARGET_PATHS[@]-}"; do
+    [[ -n "$relative_path" ]] || continue
       add_target "$ROOT_DIR/$relative_path" scratch "$ROOT_DIR"
     done
     for candidate in "${TEMP_TARGET_PATHS[@]-}"; do
