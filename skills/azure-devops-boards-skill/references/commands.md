@@ -39,6 +39,10 @@ Read the repository's tracker instructions before operating. Treat its work-item
 - A stale `/rev` — the item changed since it was read — fails the mutation immediately, with no automatic retry. Re-read and reconcile before retrying.
 - `az boards work-item update --discussion` is off-limits: it posts plain text, not a native relation. Express dependencies with `add-link` instead.
 
+## Sprint selection
+
+`current-sprint`, `sprint-inventory`, and `create` without `--iteration` select the unique team iteration whose start and finish dates include the machine's local date (inclusive). The helper reads all assigned team iterations and checks their dates because Azure's `timeframe=current` listing can retain an expired Sprint. If no unique concrete match exists, it fails with an actionable error; create or assign the iteration according to the repository's Sprint policy, then retry. An explicit `create --iteration` remains honored.
+
 ## Use the commands
 
 ```bash

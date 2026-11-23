@@ -7,6 +7,7 @@ import json
 import os
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 import subprocess
 import sys
@@ -88,12 +89,29 @@ def _comment_id(comment):
 
 
 def sprint(args):
-    command = ["az", "boards", "iteration", "team", "list", "--org", args.organization, "--project", args.project, "--team", args.team, "--timeframe", "current", "--query", "[0].path", "-o", "tsv"]
+    command = ["az", "boards", "iteration", "team", "list", "--org", args.organization, "--project", args.project, "--team", args.team, "--query", "[].{path:path,startDate:attributes.startDate,finishDate:attributes.finishDate}", "-o", "json"]
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode: raise RuntimeError(result.stderr.strip() or "Current Sprint query failed.")
-    value = result.stdout.strip()
-    if not value or value == args.project: raise RuntimeError("No concrete current Sprint is configured.")
-    return value
+    try:
+        iterations = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Current Sprint query returned invalid JSON.") from error
+    if not isinstance(iterations, list): raise RuntimeError("Current Sprint query returned an invalid iteration list.")
+    today = date.today()
+    matches = set()
+    for iteration in iterations:
+        path, start, finish = iteration.get("path"), iteration.get("startDate"), iteration.get("finishDate")
+        if not path or path == args.project or not start or not finish: continue
+        try:
+            start, finish = date.fromisoformat(str(start)[:10]), date.fromisoformat(str(finish)[:10])
+        except ValueError as error:
+            raise RuntimeError(f"Invalid Sprint dates for {path!r}.") from error
+        if finish < start: raise RuntimeError(f"Sprint finish date precedes its start date: {path!r}.")
+        if start <= today <= finish: matches.add(path)
+    if len(matches) != 1:
+        paths = ", ".join(sorted(matches)) or "none"
+        raise RuntimeError(f"Expected one team Sprint covering {today.isoformat()}, found {paths}; update the team's iteration dates.")
+    return matches.pop()
 
 
 class AzureClient:
