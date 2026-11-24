@@ -15,11 +15,20 @@ agent reads.
 
 When the current prompt does **not** assign the semantic `task-boards-ops`
 role, your first action on an Azure Boards request is to spawn one isolated
-child and assign that role. On Codex/ChatGPT, prefer `gpt-6.1-terra` with
-`reasoning_effort=medium`; if it is unavailable, use GPT-6 Sol with
-`reasoning_effort=medium`. Do not treat a specific model ID as a universal
-requirement or infer that spawning is unavailable solely because one ID cannot
-be selected. On Claude Code, use
+child and assign that role.
+
+### Codex / ChatGPT
+
+Use Luna with `reasoning_effort=high` and the Luna model ID exposed by the
+current host. If that pair is unavailable, use `gpt-6.1-terra` with
+`reasoning_effort=medium`. Every `spawn_agent` call for a Boards child must
+explicitly pass both `model` and `reasoning_effort`, including fallback
+attempts. Set `fork_turns="none"` to enable overrides. If the spawn tool exists
+and neither pair is available, report that dispatch is blocked.
+
+### Other hosts
+
+On Claude Code, use
 `agent(prompt, {model: 'haiku', effort: 'low'})` inside a `Workflow` script;
 the bare `Agent` tool cannot set `effort` explicitly. If the caller is itself
 already running inside a `Workflow` script (for example, when the
