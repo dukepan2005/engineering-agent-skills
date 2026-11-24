@@ -43,6 +43,10 @@ Read the repository's tracker instructions before operating. Treat its work-item
 
 `current-sprint`, `sprint-inventory`, and `create` without `--iteration` select the unique team iteration whose start and finish dates include the machine's local date (inclusive). The helper reads all assigned team iterations and checks their dates because Azure's `timeframe=current` listing can retain an expired Sprint. If no unique concrete match exists, it fails with an actionable error; create or assign the iteration according to the repository's Sprint policy, then retry. An explicit `create --iteration` remains honored.
 
+For a default or unspecified iteration, omit `--iteration` and report the
+resolved iteration from the create result. For a specified iteration, pass
+that path and verify the create result matches it.
+
 ## Use the commands
 
 ```bash

@@ -68,8 +68,23 @@ class CreateCommandTests(unittest.TestCase):
     def test_applied_mode_writes_and_assigns_id(self):
         fake = FakeClient()
         out = _run(create, fake, self._args(apply=True))
-        self.assertEqual(out, {"mode": "applied", "id": 1000, "rev": 2})
+        self.assertEqual(out, {"mode": "applied", "id": 1000, "rev": 2, "iteration": "Sprint 1"})
         self.assertEqual(fake.applies, 1)
+
+    def test_create_without_iteration_uses_current_sprint(self):
+        fake = FakeClient()
+        with mock.patch("azure_devops_boards.sprint", return_value="P\\Sprint 2") as current_sprint:
+            out = _run(create, fake, self._args(apply=True, iteration=None))
+        current_sprint.assert_called_once()
+        self.assertEqual(out["iteration"], "P\\Sprint 2")
+        self.assertEqual(fake.read(out["id"])["fields"]["System.IterationPath"], "P\\Sprint 2")
+
+    def test_explicit_iteration_does_not_resolve_current_sprint(self):
+        fake = FakeClient()
+        with mock.patch("azure_devops_boards.sprint") as current_sprint:
+            out = _run(create, fake, self._args(apply=True, iteration="P\\Backlog"))
+        current_sprint.assert_not_called()
+        self.assertEqual(out["iteration"], "P\\Backlog")
 
     def test_initial_comment_is_validated_or_persisted_with_creation(self):
         for apply in (False, True):

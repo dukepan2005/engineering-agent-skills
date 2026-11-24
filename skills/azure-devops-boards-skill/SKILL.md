@@ -34,6 +34,10 @@ The spawn instruction must be self-contained. Tell the child to use
 `$azure-devops-boards-skill` in the semantic role and name the exact operation
 and parameters. The child returns structured JSON.
 
+For creation without a specified iteration, tell the child to omit
+`--iteration` and report the helper-resolved Sprint. When an iteration is
+specified, pass that path and verify the returned iteration matches it.
+
 Do not run any helper command yourself. Do not read
 `references/commands.md` into this router context. Do not search for duplicate
 work items before creating one.

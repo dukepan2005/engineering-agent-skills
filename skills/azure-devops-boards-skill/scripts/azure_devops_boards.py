@@ -709,6 +709,7 @@ def create(args):
         if initial_comment is not None:
             output["comment"] = {"format": "markdown", "length": len(initial_comment)}
         return emit(output)
+    result["iteration"] = iteration
     if initial_comment is not None:
         try:
             saved = client.add_comment(result["id"], initial_comment)
